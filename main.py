@@ -123,15 +123,11 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
         
     cmd.append(url)
     
-    # Wrap the yt-dlp command in a bash shell with a hard virtual memory limit of ~1.5GB (1500000 KB)
-    cmd_str = " ".join([f"'{c}'" if ' ' in c or '*' in c else c for c in cmd])
-    safe_cmd = ['bash', '-c', f'ulimit -v 1500000; exec {cmd_str}']
-    
     try:
         # Run yt-dlp via subprocess with a strict context manager to guarantee pipe cleanup
         env = os.environ.copy()
         env["TMPDIR"] = TEMP_STORAGE_DIR
-        with subprocess.Popen(safe_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env) as process:
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env) as process:
             progress_regex = re.compile(r'\[download\]\s+([\d\.]+%?)')
             
             for line in process.stdout:
@@ -378,15 +374,12 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
                 
             cmd.append(video_url)
 
-            cmd_str = " ".join([f"'{c}'" if ' ' in c or '*' in c else c for c in cmd])
-            safe_cmd = ['bash', '-c', f'ulimit -v 1500000; exec {cmd_str}']
-
             try:
                 # Run yt-dlp via subprocess to absolutely guarantee NO memory leaks 
                 # (yt-dlp Python API retains extractor caches in memory)
                 env = os.environ.copy()
                 env["TMPDIR"] = TEMP_STORAGE_DIR
-                with subprocess.Popen(safe_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env) as process:
+                with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env) as process:
                     progress_regex = re.compile(r'\[download\]\s+([\d\.]+%?)')
                     
                     for line in process.stdout:
