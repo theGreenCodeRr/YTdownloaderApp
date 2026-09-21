@@ -355,12 +355,14 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
                     print(f"Failed to download {video_title}, return code {process.returncode}")
                     continue
                 
-                # Zip using CLI tool to completely eliminate Python zipfile memory caching issues
+                # Zip using CLI tool and force it to use TEMP_STORAGE_DIR for temp files (-b) 
+                # This prevents zip from using /tmp (RAM) for multi-gigabyte temporary files
                 for root, _, files in os.walk(task_dir):
                     for file in files:
                         file_path = os.path.join(root, file)
                         # -j = junk paths (don't store directories), -u = update (or create)
-                        subprocess.run(['zip', '-j', '-u', output_zip_path, file_path], check=True, stdout=subprocess.DEVNULL)
+                        # -b = specify temp directory so it doesn't exhaust RAM!
+                        subprocess.run(['zip', '-b', TEMP_STORAGE_DIR, '-j', '-u', output_zip_path, file_path], check=True, stdout=subprocess.DEVNULL)
                         os.remove(file_path) # Free space immediately
                             
             except Exception as e:
