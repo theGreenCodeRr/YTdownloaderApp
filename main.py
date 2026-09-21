@@ -68,12 +68,41 @@ class ProcessPlaylistRequest(BaseModel):
     title: str = "playlist"
 
 # Helper functions
+import ctypes
+
 def format_bytes(b):
     if b is None: return "0 B"
     if b < 1024: return f"{b} B"
     elif b < 1024**2: return f"{b/1024:.1f} KiB"
     elif b < 1024**3: return f"{b/1024**2:.1f} MiB"
     else: return f"{b/1024**3:.1f} GiB"
+
+def drop_os_cache(filepath: str):
+    """
+    Forcefully evict a file from the Linux OS Page Cache.
+    This prevents RAM usage from ballooning when internet speed > HDD write speed.
+    """
+    if not os.path.exists(filepath):
+        return
+        
+    try:
+        # Load libc
+        libc = ctypes.CDLL(None)
+        if not hasattr(libc, 'posix_fadvise'):
+            libc = ctypes.CDLL("libc.so.6")
+            
+        POSIX_FADV_DONTNEED = 4
+        
+        # Open file descriptor
+        fd = os.open(filepath, os.O_RDONLY)
+        try:
+            # Tell kernel we don't need this file in RAM anymore
+            libc.posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED)
+        finally:
+            os.close(fd)
+    except Exception as e:
+        print(f"Failed to drop cache for {filepath}: {e}")
+
 
 def download_video_sync(task_id: str, url: str, format_id: str, output_path: str, client_id: str = None):
     """
@@ -94,23 +123,28 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
         
     cmd.append(url)
     
+    # Wrap the yt-dlp command in a bash shell with a hard virtual memory limit of ~1.5GB (1500000 KB)
+    cmd_str = " ".join([f"'{c}'" if ' ' in c or '*' in c else c for c in cmd])
+    safe_cmd = ['bash', '-c', f'ulimit -v 1500000; exec {cmd_str}']
+    
     try:
-        # Run yt-dlp via subprocess to guarantee zero memory leakage in the Python process
+        # Run yt-dlp via subprocess with a strict context manager to guarantee pipe cleanup
         env = os.environ.copy()
         env["TMPDIR"] = TEMP_STORAGE_DIR
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
-        progress_regex = re.compile(r'\[download\]\s+([\d\.]+%?)')
-        
-        for line in process.stdout:
-            if task_id in cancel_flags:
-                process.terminate()
-                raise Exception("Download cancelled by user")
-                
-            match = progress_regex.search(line)
-            if match:
-                downloads[task_id]["progress"] = match.group(1)
-        
-        process.wait()
+        with subprocess.Popen(safe_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env) as process:
+            progress_regex = re.compile(r'\[download\]\s+([\d\.]+%?)')
+            
+            for line in process.stdout:
+                if task_id in cancel_flags:
+                    process.terminate()
+                    raise Exception("Download cancelled by user")
+                    
+                match = progress_regex.search(line)
+                if match:
+                    downloads[task_id]["progress"] = match.group(1)
+            
+            process.wait()
+            
         if process.returncode != 0 and task_id not in cancel_flags:
             raise Exception(f"yt-dlp failed with return code {process.returncode}")
         
@@ -121,6 +155,10 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
         if possible_files:
             # Found the completed file
             actual_path = os.path.join(TEMP_STORAGE_DIR, possible_files[0])
+            
+            # Immediately force Linux to drop this file from RAM to prevent Page Cache ballooning
+            drop_os_cache(actual_path)
+            
             downloads[task_id]["filepath"] = actual_path
             downloads[task_id]["status"] = "completed"
             
@@ -340,28 +378,39 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
                 
             cmd.append(video_url)
 
+            cmd_str = " ".join([f"'{c}'" if ' ' in c or '*' in c else c for c in cmd])
+            safe_cmd = ['bash', '-c', f'ulimit -v 1500000; exec {cmd_str}']
+
             try:
                 # Run yt-dlp via subprocess to absolutely guarantee NO memory leaks 
                 # (yt-dlp Python API retains extractor caches in memory)
                 env = os.environ.copy()
                 env["TMPDIR"] = TEMP_STORAGE_DIR
-                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
-                progress_regex = re.compile(r'\[download\]\s+([\d\.]+%?)')
-                
-                for line in process.stdout:
-                    if task_id in cancel_flags:
-                        process.terminate()
-                        raise Exception("Download cancelled by user")
-                        
-                    match = progress_regex.search(line)
-                    if match:
-                        percent_str = match.group(1)
-                        downloads[task_id]["progress"] = f"[Video {index + 1}/{len(entries)}] {video_title} - {percent_str}"
-                
-                process.wait()
+                with subprocess.Popen(safe_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env) as process:
+                    progress_regex = re.compile(r'\[download\]\s+([\d\.]+%?)')
+                    
+                    for line in process.stdout:
+                        if task_id in cancel_flags:
+                            process.terminate()
+                            raise Exception("Download cancelled by user")
+                            
+                        match = progress_regex.search(line)
+                        if match:
+                            percent_str = match.group(1)
+                            downloads[task_id]["progress"] = f"[Video {index + 1}/{len(entries)}] {video_title} - {percent_str}"
+                    
+                    process.wait()
+                    
                 if process.returncode != 0 and task_id not in cancel_flags:
                     print(f"Failed to download {video_title}, return code {process.returncode}")
                     continue
+                
+                # Audio extraction changes the file extension, so we must search for the final file
+                # It is located in task_dir
+                possible_files = [f for f in os.listdir(task_dir) if f.startswith(entry.get('title', f"Video_{index+1}"))]
+                if possible_files:
+                    actual_path = os.path.join(task_dir, possible_files[0])
+                    drop_os_cache(actual_path)
                 
             except Exception as e:
                 if task_id in cancel_flags:
