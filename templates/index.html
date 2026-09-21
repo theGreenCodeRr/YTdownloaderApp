@@ -566,7 +566,7 @@
         }
 
         function renderPlaylist(data) {
-            videoTitle.textContent = data.title;
+            videoTitle.textContent = `${data.title} (${data.entries ? data.entries.length : 0} videos)`;
             currentTitle = data.title;
             videoType.textContent = 'Playlist';
             videoThumb.src = ''; 
@@ -576,7 +576,7 @@
             playlistEntries.innerHTML = '';
             
             if (data.entries && data.entries.length > 0) {
-                data.entries.forEach(entry => {
+                data.entries.forEach((entry, index) => {
                     const li = document.createElement('li');
                     li.className = 'recent-item';
                     li.style.cursor = 'pointer';
@@ -589,10 +589,11 @@
                     }
                     
                     const safeTitle = (entry.title || 'video').replace(/"/g, '&quot;');
+                    const displayTitle = `${index + 1}. ${safeTitle}`;
                     
                     li.innerHTML = `
                         <div class="recent-info">
-                            <span class="recent-title" title="${safeTitle}">${safeTitle}</span>
+                            <span class="recent-title" title="${safeTitle}">${displayTitle}</span>
                             <span class="recent-status" style="color: #64748b">Video${durText}</span>
                         </div>
                     `;
@@ -801,7 +802,10 @@
                     if (data.status === 'processing') {
                         // Update progress bar
                         if (data.progress) {
-                            progressBar.style.width = data.progress;
+                            const percentMatch = data.progress.match(/(\d+\.?\d*)%/);
+                            if (percentMatch) {
+                                progressBar.style.width = percentMatch[0];
+                            }
                             setStatus(`Downloading... ${data.progress}`);
                         }
                     } else if (data.status === 'completed') {
