@@ -45,6 +45,9 @@ downloads = {}
 # { client_id: [ { task_id, title, thumbnail, format, status, timestamp }, ... ] }
 recent_downloads = {}
 
+# Keep track of cancelled tasks
+cancel_flags = set()
+
 templates = Jinja2Templates(directory="templates")
 
 # Models
@@ -80,6 +83,9 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
     is_audio_only = format_id.startswith('audio-')
     
     def progress_hook(d):
+        if task_id in cancel_flags:
+            raise Exception("Download cancelled by user")
+            
         if d['status'] == 'downloading':
             percent_str = d.get('_percent_str', '0%').strip()
             # Strip ANSI escape codes just in case
@@ -144,13 +150,19 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
                         break
 
     except Exception as e:
+        err_msg = str(e)
+        if task_id in cancel_flags:
+            err_msg = "Download cancelled by user"
+            
         downloads[task_id]["status"] = "failed"
-        downloads[task_id]["error"] = str(e)
+        downloads[task_id]["error"] = err_msg
         if client_id and client_id in recent_downloads:
             for idx, item in enumerate(recent_downloads[client_id]):
                 if item["task_id"] == task_id:
                     recent_downloads[client_id][idx]["status"] = "failed"
                     break
+    finally:
+        cancel_flags.discard(task_id)
 
 
 # Background task to clean up old files periodically
@@ -286,10 +298,21 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
     is_audio_only = format_id.startswith('audio-')
 
     def progress_hook(d):
+        if task_id in cancel_flags:
+            raise Exception("Download cancelled by user")
+            
         if d['status'] == 'downloading':
             percent_str = d.get('_percent_str', '0%').strip()
             percent_str = re.sub(r'\x1b\[[0-9;]*m', '', percent_str)
-            downloads[task_id]["progress"] = percent_str
+            
+            info = d.get('info_dict', {})
+            title = info.get('title', 'Unknown Title')
+            playlist_index = info.get('playlist_index')
+            
+            if playlist_index:
+                downloads[task_id]["progress"] = f"[Video {playlist_index}] {title} - {percent_str}"
+            else:
+                downloads[task_id]["progress"] = percent_str
 
     ydl_opts = {
         'outtmpl': os.path.join(task_dir, '%(title)s.%(ext)s'),
@@ -348,14 +371,19 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
             raise Exception("Failed to create zip file")
 
     except Exception as e:
+        err_msg = str(e)
+        if task_id in cancel_flags:
+            err_msg = "Download cancelled by user"
+            
         downloads[task_id]["status"] = "failed"
-        downloads[task_id]["error"] = str(e)
+        downloads[task_id]["error"] = err_msg
         if client_id and client_id in recent_downloads:
             for idx, item in enumerate(recent_downloads[client_id]):
                 if item["task_id"] == task_id:
                     recent_downloads[client_id][idx]["status"] = "failed"
                     break
     finally:
+        cancel_flags.discard(task_id)
         if os.path.exists(task_dir):
             shutil.rmtree(task_dir, ignore_errors=True)
 
@@ -410,6 +438,17 @@ async def get_status(task_id: str):
         "error": downloads[task_id]["error"],
         "progress": downloads[task_id].get("progress", "0%")
     }
+
+@app.post("/api/cancel/{task_id}")
+async def cancel_download(task_id: str):
+    if task_id not in downloads:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if downloads[task_id]["status"] == "processing":
+        cancel_flags.add(task_id)
+        return {"status": "cancelling"}
+    else:
+        return {"status": "already_finished"}
 
 def delete_file_after_response(filepath: str, task_id: str):
     """Callback to delete the file after it has been served."""

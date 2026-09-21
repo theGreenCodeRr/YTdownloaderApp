@@ -408,6 +408,7 @@
             <ul id="formatList"></ul>
 
             <button id="downloadButton" disabled>Download Selected Format</button>
+            <button id="premiumAdBtn" style="display: none; width: 100%; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); margin-top: 16px;">⭐ Want to download full playlists? Upgrade to Premium!</button>
 
             <div id="statusContainer">
                 <div class="loader" id="loader"></div>
@@ -415,6 +416,7 @@
                     <div class="progress-bar" id="progressBar"></div>
                 </div>
                 <div id="statusText"></div>
+                <button id="cancelButton" style="display: none; margin-top: 16px; background: var(--error-color); padding: 10px 20px;">Cancel Download</button>
             </div>
         </div>
 
@@ -446,6 +448,8 @@
         const fetchButton = document.getElementById('fetchButton');
         const formatList = document.getElementById('formatList');
         const downloadButton = document.getElementById('downloadButton');
+        const premiumAdBtn = document.getElementById('premiumAdBtn');
+        const cancelButton = document.getElementById('cancelButton');
         const statusText = document.getElementById('statusText');
         const loader = document.getElementById('loader');
         const progressContainer = document.getElementById('progressContainer');
@@ -471,12 +475,14 @@
         let currentUrl = null;
         let currentTitle = 'video';
         let currentThumbnail = '';
+        let currentTaskId = null;
         let pollingInterval = null;
         let recentPollingInterval = null;
         let isDownloadingPlaylist = false;
         
         // Playlist State Caching
         let currentPlaylistData = null; // Stores the playlist metadata & entries
+        let currentPlaylistUrl = null; // Stores the URL of the current playlist
 
         // API Base
         const API_URL = window.location.origin;
@@ -502,6 +508,8 @@
                 progressContainer.style.display = 'none';
                 fetchButton.disabled = true;
                 downloadButton.style.display = 'none';
+                premiumAdBtn.style.display = 'none';
+                cancelButton.style.display = 'none';
                 formatList.style.display = 'none';
                 videoMeta.style.display = 'none';
                 videoTitle.textContent = '';
@@ -516,17 +524,28 @@
                 fetchButton.disabled = false;
                 downloadButton.style.display = 'block';
                 downloadButton.disabled = true;
+                cancelButton.style.display = 'none';
                 formatList.style.display = 'block';
                 videoMeta.style.display = 'flex';
                 playlistEntries.style.display = 'none';
                 playlistControlsTop.style.display = 'none';
                 playlistControlsBottom.style.display = 'none';
+                
+                // Show premium ad only if we are browsing a single video from a playlist
+                if (currentPlaylistData && backToPlaylistBtn.style.display === 'block') {
+                    premiumAdBtn.style.display = 'block';
+                } else {
+                    premiumAdBtn.style.display = 'none';
+                }
+                
                 setStatus('Select a format to download.');
             } else if (state === 'playlist') {
                 loader.style.display = 'none';
                 progressContainer.style.display = 'none';
                 fetchButton.disabled = false;
                 downloadButton.style.display = 'none';
+                premiumAdBtn.style.display = 'none';
+                cancelButton.style.display = 'none';
                 formatList.style.display = 'none';
                 videoMeta.style.display = 'flex';
                 backToPlaylistBtn.style.display = 'none';
@@ -540,6 +559,8 @@
                 progressBar.style.width = '0%';
                 fetchButton.disabled = true;
                 downloadButton.disabled = true;
+                premiumAdBtn.style.display = 'none';
+                cancelButton.style.display = 'block';
                 setStatus('Server is downloading and processing the video...');
             }
         }
@@ -677,6 +698,7 @@
 
             if (!fromPlaylist) {
                 currentPlaylistData = null; // Clear cached playlist if it's a completely new fetch
+                currentPlaylistUrl = null;
             }
 
             try {
@@ -695,6 +717,7 @@
                 
                 if (data.is_playlist) {
                     currentPlaylistData = data;
+                    if (!fromPlaylist) currentPlaylistUrl = url;
                     renderPlaylist(data);
                 } else {
                     renderVideoFormats(data, fromPlaylist);
@@ -732,7 +755,9 @@
                     return;
                 }
                 processUrl = `${API_URL}/api/process_playlist`;
+                reqBody.url = currentPlaylistUrl || currentUrl; // Ensure we send playlist URL
                 reqBody.password = password;
+                reqBody.title = currentPlaylistData ? currentPlaylistData.title : currentTitle;
             }
             
             setUIState('server-downloading');
@@ -750,6 +775,7 @@
                 }
 
                 const data = await response.json();
+                currentTaskId = data.task_id;
                 pollStatus(data.task_id);
                 fetchRecentDownloads(); // Refresh history instantly
 
@@ -804,10 +830,35 @@
                 } catch (error) {
                     clearInterval(pollingInterval);
                     setStatus(`Error: ${error.message}`, 'error');
-                    setUIState('idle');
+                    // Ensure buttons are reset if we failed
+                    fetchButton.disabled = false;
                     downloadButton.disabled = false;
+                    cancelButton.style.display = 'none';
+                    premiumAdBtn.style.display = 'none';
                 }
             }, 1000); // Poll every second for smoother progress updates
+        }
+
+        async function cancelDownload() {
+            if (!currentTaskId) return;
+            
+            cancelButton.disabled = true;
+            cancelButton.textContent = "Cancelling...";
+            
+            try {
+                await fetch(`${API_URL}/api/cancel/${currentTaskId}`, {
+                    method: 'POST',
+                    headers: HEADERS
+                });
+            } catch (error) {
+                console.error("Failed to send cancel request", error);
+            }
+            
+            // Re-enable in case it fails, it will be hidden by pollStatus anyway on fail
+            setTimeout(() => {
+                cancelButton.disabled = false;
+                cancelButton.textContent = "Cancel Download";
+            }, 2000);
         }
 
         function triggerFileDownload(taskId) {
@@ -878,6 +929,12 @@
             if (e.key === 'Enter') fetchFormats();
         });
         downloadButton.addEventListener('click', startDownload);
+        cancelButton.addEventListener('click', cancelDownload);
+        premiumAdBtn.addEventListener('click', () => {
+            if (currentPlaylistData) {
+                renderPlaylist(currentPlaylistData);
+            }
+        });
         themeToggle.addEventListener('change', toggleTheme);
         downloadPlaylistTopBtn.addEventListener('click', () => {
             isDownloadingPlaylist = true;
