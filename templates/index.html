@@ -382,7 +382,7 @@
             </div>
 
             <div class="url-group">
-                <input type="text" id="urlInput" placeholder="Paste YouTube URL or Playlist here..." autocomplete="off">
+                <input type="text" id="urlInput" placeholder="Paste Video or Playlist URL here..." autocomplete="off">
                 <button id="fetchButton">Fetch</button>
             </div>
 
@@ -393,6 +393,16 @@
                     <h3 id="videoTitle"></h3>
                 </div>
                 <button id="backToPlaylistBtn">⬅ Back to Playlist</button>
+            </div>
+            
+            <div id="playlistControlsTop" style="display: none; margin-bottom: 16px;">
+                <button id="downloadPlaylistTopBtn" style="width: 100%; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">⭐ Download Entire Playlist (Premium)</button>
+            </div>
+            
+            <ul id="playlistEntries" class="recent-list" style="display: none; margin-bottom: 28px; max-height: 450px; overflow-y: auto; padding-right: 8px;"></ul>
+
+            <div id="playlistControlsBottom" style="display: none; margin-bottom: 16px;">
+                <button id="downloadPlaylistBottomBtn" style="width: 100%; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">⭐ Download Entire Playlist (Premium)</button>
             </div>
             
             <ul id="formatList"></ul>
@@ -447,6 +457,12 @@
         const videoType = document.getElementById('videoType');
         const backToPlaylistBtn = document.getElementById('backToPlaylistBtn');
         
+        const playlistControlsTop = document.getElementById('playlistControlsTop');
+        const playlistControlsBottom = document.getElementById('playlistControlsBottom');
+        const playlistEntries = document.getElementById('playlistEntries');
+        const downloadPlaylistTopBtn = document.getElementById('downloadPlaylistTopBtn');
+        const downloadPlaylistBottomBtn = document.getElementById('downloadPlaylistBottomBtn');
+        
         const themeToggle = document.getElementById('themeToggle');
         const recentList = document.getElementById('recentList');
 
@@ -457,6 +473,7 @@
         let currentThumbnail = '';
         let pollingInterval = null;
         let recentPollingInterval = null;
+        let isDownloadingPlaylist = false;
         
         // Playlist State Caching
         let currentPlaylistData = null; // Stores the playlist metadata & entries
@@ -477,6 +494,9 @@
                 progressContainer.style.display = 'none';
                 fetchButton.disabled = false;
                 downloadButton.disabled = false;
+                playlistEntries.style.display = 'none';
+                playlistControlsTop.style.display = 'none';
+                playlistControlsBottom.style.display = 'none';
             } else if (state === 'fetching') {
                 loader.style.display = 'block';
                 progressContainer.style.display = 'none';
@@ -486,6 +506,9 @@
                 videoMeta.style.display = 'none';
                 videoTitle.textContent = '';
                 backToPlaylistBtn.style.display = 'none';
+                playlistEntries.style.display = 'none';
+                playlistControlsTop.style.display = 'none';
+                playlistControlsBottom.style.display = 'none';
                 setStatus('Fetching available formats...');
             } else if (state === 'formatting') {
                 loader.style.display = 'none';
@@ -495,16 +518,22 @@
                 downloadButton.disabled = true;
                 formatList.style.display = 'block';
                 videoMeta.style.display = 'flex';
+                playlistEntries.style.display = 'none';
+                playlistControlsTop.style.display = 'none';
+                playlistControlsBottom.style.display = 'none';
                 setStatus('Select a format to download.');
             } else if (state === 'playlist') {
                 loader.style.display = 'none';
                 progressContainer.style.display = 'none';
                 fetchButton.disabled = false;
                 downloadButton.style.display = 'none';
-                formatList.style.display = 'block';
+                formatList.style.display = 'none';
                 videoMeta.style.display = 'flex';
                 backToPlaylistBtn.style.display = 'none';
-                setStatus('Select a video from the playlist to fetch its formats.');
+                playlistEntries.style.display = 'flex';
+                playlistControlsTop.style.display = 'block';
+                playlistControlsBottom.style.display = 'block';
+                setStatus('Select a video, or download the entire playlist.', 'info');
             } else if (state === 'server-downloading') {
                 loader.style.display = 'none';
                 progressContainer.style.display = 'block';
@@ -523,6 +552,37 @@
             videoThumb.style.display = 'none';
             backToPlaylistBtn.style.display = 'none';
             formatList.innerHTML = '';
+            playlistEntries.innerHTML = '';
+            
+            if (data.entries && data.entries.length > 0) {
+                data.entries.forEach(entry => {
+                    const li = document.createElement('li');
+                    li.className = 'recent-item';
+                    li.style.cursor = 'pointer';
+                    
+                    let durText = '';
+                    if (entry.duration) {
+                        const m = Math.floor(entry.duration / 60);
+                        const s = entry.duration % 60;
+                        durText = ` - ${m}:${s.toString().padStart(2, '0')}`;
+                    }
+                    
+                    const safeTitle = (entry.title || 'video').replace(/"/g, '&quot;');
+                    
+                    li.innerHTML = `
+                        <div class="recent-info">
+                            <span class="recent-title" title="${safeTitle}">${safeTitle}</span>
+                            <span class="recent-status" style="color: #64748b">Video${durText}</span>
+                        </div>
+                    `;
+                    
+                    li.addEventListener('click', () => {
+                        fetchFormats(entry.url, true);
+                    });
+                    
+                    playlistEntries.appendChild(li);
+                });
+            }
             
             if (!data.formats || data.formats.length === 0) {
                 setStatus('No video formats found.', 'error');
@@ -551,11 +611,12 @@
                 formatList.appendChild(li);
             });
             
-            downloadButton.textContent = "Download Entire Playlist (Premium)";
-            setUIState('formatting');
+            downloadButton.textContent = "Start Download (Premium)";
+            setUIState('playlist');
         }
 
         function renderVideoFormats(data, fromPlaylist = false) {
+            isDownloadingPlaylist = false;
             videoTitle.textContent = data.title;
             currentTitle = data.title;
             videoType.textContent = 'Video';
@@ -605,7 +666,7 @@
         async function fetchFormats(urlParam = null, fromPlaylist = false) {
             const url = urlParam || urlInput.value.trim();
             if (!url) {
-                setStatus('Please paste a YouTube URL first.', 'error');
+                setStatus('Please paste a Video or Playlist URL first.', 'error');
                 return;
             }
             
@@ -664,7 +725,7 @@
                 thumbnail: currentThumbnail
             };
 
-            if (currentPlaylistData) {
+            if (isDownloadingPlaylist) {
                 const password = prompt("This is a premium feature. Enter premium password to download the entire playlist:");
                 if (!password) {
                     setStatus('Password is required for playlist download.', 'error');
@@ -818,6 +879,14 @@
         });
         downloadButton.addEventListener('click', startDownload);
         themeToggle.addEventListener('change', toggleTheme);
+        downloadPlaylistTopBtn.addEventListener('click', () => {
+            isDownloadingPlaylist = true;
+            setUIState('formatting');
+        });
+        downloadPlaylistBottomBtn.addEventListener('click', () => {
+            isDownloadingPlaylist = true;
+            setUIState('formatting');
+        });
         
         // Init
         if (localStorage.getItem('theme') === 'dark' || 

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 import yt_dlp
 import re
 import shutil
+import zipfile
 
 # MacOS SSL certificate bypass
 try:
@@ -23,7 +24,7 @@ else:
     ssl._create_default_https_context = _create_unverified_https_context
 
 
-app = FastAPI(title="YouTube Video Downloader")
+app = FastAPI(title="Video Downloader")
 
 app.add_middleware(
     CORSMiddleware,
@@ -93,6 +94,7 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
         'no_playlist': True,
         'nocheckcertificate': True,
         'no-check-certificate': True,
+        'cachedir': False,
         'progress_hooks': [progress_hook],
     }
     
@@ -180,6 +182,7 @@ async def fetch_formats(req: URLRequest):
         'quiet': True, 
         'nocolor': True,
         'nocheckcertificate': True,
+        'cachedir': False,
         'extract_flat': 'in_playlist'  # Do not download formats for every video in a playlist
     }
     
@@ -293,8 +296,10 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
         'quiet': True,
         'nocolor': True,
         'yes_playlist': True,
+        'lazy_playlist': True,
         'nocheckcertificate': True,
         'no-check-certificate': True,
+        'cachedir': False,
         'progress_hooks': [progress_hook],
     }
 
@@ -321,8 +326,14 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         
-        zip_base = os.path.splitext(output_zip_path)[0]
-        shutil.make_archive(zip_base, 'zip', task_dir)
+        # Manually zip files and delete them sequentially to save storage space
+        with zipfile.ZipFile(output_zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
+            for root, _, files in os.walk(task_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, task_dir)
+                    zipf.write(file_path, arcname)
+                    os.remove(file_path) # Free storage space immediately
         
         if os.path.exists(output_zip_path):
             downloads[task_id]["status"] = "completed"
