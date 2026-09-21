@@ -81,48 +81,37 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
     Synchronous download function meant to be run in a separate thread.
     """
     is_audio_only = format_id.startswith('audio-')
-    
-    def progress_hook(d):
-        if task_id in cancel_flags:
-            raise Exception("Download cancelled by user")
-            
-        if d['status'] == 'downloading':
-            percent_str = d.get('_percent_str', '0%').strip()
-            # Strip ANSI escape codes just in case
-            percent_str = re.sub(r'\x1b\[[0-9;]*m', '', percent_str)
-            downloads[task_id]["progress"] = percent_str
-    
-    ydl_opts = {
-        'merge_output_format': 'mp4',
-        'outtmpl': output_path,
-        'quiet': True,
-        'nocolor': True,
-        'no_playlist': True,
-        'nocheckcertificate': True,
-        'no-check-certificate': True,
-        'cachedir': False,
-        'progress_hooks': [progress_hook],
-    }
+    cmd = ['yt-dlp', '--newline', '--no-colors', '--no-playlist', '--no-check-certificate']
+    cmd.extend(['-o', output_path])
     
     if is_audio_only:
         audio_codec = format_id.split('-')[1] # mp3, wav, flac
-        ydl_opts['format'] = 'bestaudio/best'
-        # when extracting audio, yt-dlp will change the extension (e.g. .mp4 -> .mp3)
-        # we will handle finding the correct file after download
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': audio_codec,
-            'preferredquality': '192',
-        }]
+        cmd.extend(['-f', 'bestaudio/best', '-x', '--audio-format', audio_codec, '--audio-quality', '192'])
     else:
-        ydl_opts['format'] = f'{format_id}+bestaudio/b'
-    
+        cmd.extend(['-f', f'{format_id}+bestaudio/b', '--merge-output-format', 'mp4'])
+        
     if os.path.exists("cookies.txt"):
-        ydl_opts['cookiefile'] = 'cookies.txt'
+        cmd.extend(['--cookies', 'cookies.txt'])
+        
+    cmd.append(url)
     
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        # Run yt-dlp via subprocess to guarantee zero memory leakage in the Python process
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        progress_regex = re.compile(r'\[download\]\s+([\d\.]+%?)')
+        
+        for line in process.stdout:
+            if task_id in cancel_flags:
+                process.terminate()
+                raise Exception("Download cancelled by user")
+                
+            match = progress_regex.search(line)
+            if match:
+                downloads[task_id]["progress"] = match.group(1)
+        
+        process.wait()
+        if process.returncode != 0 and task_id not in cancel_flags:
+            raise Exception(f"yt-dlp failed with return code {process.returncode}")
         
         # Audio extraction changes the file extension, so we must search for the final file
         base_path = os.path.splitext(output_path)[0]
@@ -331,47 +320,43 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
 
             video_title = entry.get('title', f"Video_{index+1}")
 
-            def progress_hook(d):
-                if task_id in cancel_flags:
-                    raise Exception("Download cancelled by user")
-                if d['status'] == 'downloading':
-                    percent_str = d.get('_percent_str', '0%').strip()
-                    percent_str = re.sub(r'\x1b\[[0-9;]*m', '', percent_str)
-                    downloads[task_id]["progress"] = f"[Video {index + 1}/{len(entries)}] {video_title} - {percent_str}"
-
-            ydl_opts = {
-                'outtmpl': os.path.join(task_dir, '%(title)s.%(ext)s'),
-                'quiet': True,
-                'nocolor': True,
-                'nocheckcertificate': True,
-                'no-check-certificate': True,
-                'cachedir': False,
-                'progress_hooks': [progress_hook],
-            }
-
+            cmd = ['yt-dlp', '--newline', '--no-colors', '--no-check-certificate']
+            cmd.extend(['-o', os.path.join(task_dir, '%(title)s.%(ext)s')])
+            
             if is_audio_only:
                 audio_codec = format_id.split('-')[1]
-                ydl_opts['format'] = 'bestaudio/best'
-                ydl_opts['postprocessors'] = [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': audio_codec,
-                    'preferredquality': '192',
-                }]
+                cmd.extend(['-f', 'bestaudio/best', '-x', '--audio-format', audio_codec, '--audio-quality', '192'])
             else:
                 if format_id == 'best':
-                    ydl_opts['format'] = 'bestvideo+bestaudio/best'
-                    ydl_opts['merge_output_format'] = 'mp4'
+                    cmd.extend(['-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4'])
                 else:
-                    ydl_opts['format'] = format_id
-                    ydl_opts['merge_output_format'] = 'mp4'
-
+                    cmd.extend(['-f', format_id, '--merge-output-format', 'mp4'])
+                    
             if os.path.exists("cookies.txt"):
-                ydl_opts['cookiefile'] = 'cookies.txt'
+                cmd.extend(['--cookies', 'cookies.txt'])
+                
+            cmd.append(video_url)
 
             try:
-                # Instantiate fresh YoutubeDL per video to prevent RAM accumulation leaks
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([video_url])
+                # Run yt-dlp via subprocess to absolutely guarantee NO memory leaks 
+                # (yt-dlp Python API retains extractor caches in memory)
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                progress_regex = re.compile(r'\[download\]\s+([\d\.]+%?)')
+                
+                for line in process.stdout:
+                    if task_id in cancel_flags:
+                        process.terminate()
+                        raise Exception("Download cancelled by user")
+                        
+                    match = progress_regex.search(line)
+                    if match:
+                        percent_str = match.group(1)
+                        downloads[task_id]["progress"] = f"[Video {index + 1}/{len(entries)}] {video_title} - {percent_str}"
+                
+                process.wait()
+                if process.returncode != 0 and task_id not in cancel_flags:
+                    print(f"Failed to download {video_title}, return code {process.returncode}")
+                    continue
                 
                 # Zip the downloaded file(s) immediately and delete them to prevent disk bloat
                 with zipfile.ZipFile(output_zip_path, 'a', compression=zipfile.ZIP_DEFLATED) as zipf:
@@ -386,7 +371,7 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
                 if task_id in cancel_flags:
                     raise Exception("Download cancelled by user")
                 # If a single video fails (e.g. unavailable), log it and continue
-                print(f"Failed to download {video_title}: {e}")
+                print(f"Exception during {video_title}: {e}")
                 continue
 
         if os.path.exists(output_zip_path) and os.path.getsize(output_zip_path) > 22: # > 22 bytes means not an empty zip
