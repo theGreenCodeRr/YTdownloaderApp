@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import yt_dlp
 import re
+import shutil
 
 # MacOS SSL certificate bypass
 try:
@@ -46,6 +47,8 @@ recent_downloads = {}
 templates = Jinja2Templates(directory="templates")
 
 # Models
+PREMIUM_PASSWORD = os.environ.get("PREMIUM_PASSWORD", "premium123")
+
 class URLRequest(BaseModel):
     url: str
 
@@ -54,6 +57,12 @@ class ProcessRequest(BaseModel):
     format_id: str
     title: str = "video"
     thumbnail: str = ""
+
+class ProcessPlaylistRequest(BaseModel):
+    url: str
+    password: str
+    format_id: str
+    title: str = "playlist"
 
 # Helper functions
 def format_bytes(b):
@@ -194,10 +203,18 @@ async def fetch_formats(req: URLRequest):
                         "title": entry.get('title', 'Unknown Title'),
                         "duration": entry.get('duration'),
                     })
+            playlist_formats = [
+                {"id": "best", "ext": "mp4", "res": "Best", "note": "Best quality available", "size_str": "Auto"},
+                {"id": "bestvideo[height<=1080]+bestaudio/best", "ext": "mp4", "res": "1080p", "note": "Up to 1080p", "size_str": "Auto"},
+                {"id": "bestvideo[height<=720]+bestaudio/best", "ext": "mp4", "res": "720p", "note": "Up to 720p", "size_str": "Auto"},
+                {"id": "bestvideo[height<=480]+bestaudio/best", "ext": "mp4", "res": "480p", "note": "Up to 480p", "size_str": "Auto"},
+                {"id": "audio-mp3", "ext": "mp3", "res": "Audio", "note": "High Quality MP3", "size_str": "Auto"}
+            ]
             return {
                 "is_playlist": True,
                 "title": info.get('title', 'YouTube Playlist'),
-                "entries": entries
+                "entries": entries,
+                "formats": playlist_formats
             }
         
         # It's a single video
@@ -260,6 +277,113 @@ async def process_video(req: ProcessRequest, background_tasks: BackgroundTasks, 
     
     return {"task_id": task_id}
 
+def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_path: str, client_id: str = None):
+    task_dir = os.path.join(TEMP_STORAGE_DIR, task_id)
+    os.makedirs(task_dir, exist_ok=True)
+    is_audio_only = format_id.startswith('audio-')
+
+    def progress_hook(d):
+        if d['status'] == 'downloading':
+            percent_str = d.get('_percent_str', '0%').strip()
+            percent_str = re.sub(r'\x1b\[[0-9;]*m', '', percent_str)
+            downloads[task_id]["progress"] = percent_str
+
+    ydl_opts = {
+        'outtmpl': os.path.join(task_dir, '%(title)s.%(ext)s'),
+        'quiet': True,
+        'nocolor': True,
+        'yes_playlist': True,
+        'nocheckcertificate': True,
+        'no-check-certificate': True,
+        'progress_hooks': [progress_hook],
+    }
+
+    if is_audio_only:
+        audio_codec = format_id.split('-')[1] # mp3, wav, flac
+        ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': audio_codec,
+            'preferredquality': '192',
+        }]
+    else:
+        if format_id == 'best':
+            ydl_opts['format'] = 'bestvideo+bestaudio/best'
+            ydl_opts['merge_output_format'] = 'mp4'
+        else:
+            ydl_opts['format'] = format_id
+            ydl_opts['merge_output_format'] = 'mp4'
+
+    if os.path.exists("cookies.txt"):
+        ydl_opts['cookiefile'] = 'cookies.txt'
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        
+        zip_base = os.path.splitext(output_zip_path)[0]
+        shutil.make_archive(zip_base, 'zip', task_dir)
+        
+        if os.path.exists(output_zip_path):
+            downloads[task_id]["status"] = "completed"
+            downloads[task_id]["filepath"] = output_zip_path
+            
+            if client_id and client_id in recent_downloads:
+                for idx, item in enumerate(recent_downloads[client_id]):
+                    if item["task_id"] == task_id:
+                        recent_downloads[client_id][idx]["status"] = "completed"
+                        break
+        else:
+            raise Exception("Failed to create zip file")
+
+    except Exception as e:
+        downloads[task_id]["status"] = "failed"
+        downloads[task_id]["error"] = str(e)
+        if client_id and client_id in recent_downloads:
+            for idx, item in enumerate(recent_downloads[client_id]):
+                if item["task_id"] == task_id:
+                    recent_downloads[client_id][idx]["status"] = "failed"
+                    break
+    finally:
+        if os.path.exists(task_dir):
+            shutil.rmtree(task_dir, ignore_errors=True)
+
+@app.post("/api/process_playlist")
+async def process_playlist(req: ProcessPlaylistRequest, background_tasks: BackgroundTasks, x_client_id: str = Header(default="anonymous")):
+    if req.password != PREMIUM_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid premium password")
+        
+    task_id = str(uuid.uuid4())
+    output_zip_path = os.path.join(TEMP_STORAGE_DIR, f"{task_id}.zip")
+    
+    downloads[task_id] = {
+        "status": "processing",
+        "filepath": output_zip_path,
+        "error": None,
+        "progress": "0%",
+        "media_type": "application/zip",
+        "filename": f"{req.title}.zip"
+    }
+    
+    if x_client_id not in recent_downloads:
+        recent_downloads[x_client_id] = []
+        
+    recent_downloads[x_client_id].insert(0, {
+        "task_id": task_id,
+        "title": req.title,
+        "thumbnail": "",
+        "format": req.format_id,
+        "status": "processing",
+        "timestamp": time.time()
+    })
+    
+    if len(recent_downloads[x_client_id]) > 50:
+        recent_downloads[x_client_id].pop()
+    
+    background_tasks.add_task(download_playlist_sync, task_id, req.url, req.format_id, output_zip_path, x_client_id)
+    
+    return {"task_id": task_id}
+
 @app.get("/api/recent")
 async def get_recent(x_client_id: str = Header(default="anonymous")):
     return {"recent": recent_downloads.get(x_client_id, [])}
@@ -302,14 +426,17 @@ async def download_file(task_id: str, title: str = "video", background_tasks: Ba
         raise HTTPException(status_code=404, detail="File not found on server")
     
     safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '.', '_', '-')).rstrip()
-    filename = f"{safe_title}.mp4"
+    
+    media_type = task_info.get("media_type", "video/mp4")
+    ext = ".zip" if media_type == "application/zip" else ".mp4"
+    filename = task_info.get("filename", f"{safe_title}{ext}")
     
     background_tasks.add_task(delete_file_after_response, filepath, task_id)
     
     return FileResponse(
         path=filepath,
         filename=filename,
-        media_type='video/mp4'
+        media_type=media_type
     )
 
 # Frontend Serving

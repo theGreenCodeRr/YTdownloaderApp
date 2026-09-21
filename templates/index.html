@@ -524,29 +524,35 @@
             backToPlaylistBtn.style.display = 'none';
             formatList.innerHTML = '';
             
-            if (!data.entries || data.entries.length === 0) {
-                setStatus('No videos found in playlist.', 'error');
+            if (!data.formats || data.formats.length === 0) {
+                setStatus('No video formats found.', 'error');
                 setUIState('idle');
                 return;
             }
             
-            data.entries.forEach(entry => {
+            data.formats.forEach(f => {
                 const li = document.createElement('li');
                 li.innerHTML = `
                     <div class="format-details">
-                        <span class="format-res" style="max-width: 400px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${entry.title}</span>
+                        <span class="format-res">${f.res}</span>
+                        <span class="format-ext">${f.ext}</span>
+                        <span class="format-size">${f.size_str}</span>
                     </div>
-                    <span class="format-note">Click to Fetch</span>
+                    <span class="format-note">${f.note}</span>
                 `;
                 
                 li.addEventListener('click', () => {
-                    fetchFormats(entry.url, true); // true = fetching item from playlist
+                    document.querySelectorAll('#formatList li.selected').forEach(el => el.classList.remove('selected'));
+                    li.classList.add('selected');
+                    selectedFormatId = f.id;
+                    downloadButton.disabled = false;
                 });
                 
                 formatList.appendChild(li);
             });
             
-            setUIState('playlist');
+            downloadButton.textContent = "Download Entire Playlist (Premium)";
+            setUIState('formatting');
         }
 
         function renderVideoFormats(data, fromPlaylist = false) {
@@ -592,6 +598,7 @@
                 formatList.appendChild(li);
             });
             
+            downloadButton.textContent = "Download Selected Format";
             setUIState('formatting');
         }
 
@@ -649,18 +656,31 @@
                 return;
             }
             
+            let processUrl = `${API_URL}/api/process`;
+            let reqBody = { 
+                url: currentUrl, 
+                format_id: selectedFormatId,
+                title: currentTitle,
+                thumbnail: currentThumbnail
+            };
+
+            if (currentPlaylistData) {
+                const password = prompt("This is a premium feature. Enter premium password to download the entire playlist:");
+                if (!password) {
+                    setStatus('Password is required for playlist download.', 'error');
+                    return;
+                }
+                processUrl = `${API_URL}/api/process_playlist`;
+                reqBody.password = password;
+            }
+            
             setUIState('server-downloading');
             
             try {
-                const response = await fetch(`${API_URL}/api/process`, {
+                const response = await fetch(processUrl, {
                     method: 'POST',
                     headers: HEADERS,
-                    body: JSON.stringify({ 
-                        url: currentUrl, 
-                        format_id: selectedFormatId,
-                        title: currentTitle,
-                        thumbnail: currentThumbnail
-                    })
+                    body: JSON.stringify(reqBody)
                 });
 
                 if (!response.ok) {
