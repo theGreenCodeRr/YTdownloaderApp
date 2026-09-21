@@ -398,12 +398,12 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
                     print(f"Failed to download {video_title}, return code {process.returncode}")
                     continue
                 
-                # Audio extraction changes the file extension, so we must search for the final file
-                # It is located in task_dir
-                possible_files = [f for f in os.listdir(task_dir) if f.startswith(entry.get('title', f"Video_{index+1}"))]
-                if possible_files:
-                    actual_path = os.path.join(task_dir, possible_files[0])
-                    drop_os_cache(actual_path)
+                # yt-dlp sanitizes titles (removes emojis, slashes, etc.) from filenames.
+                # To guarantee we drop the cache regardless of the final filename, 
+                # we simply drop the cache for EVERY file currently in the task directory.
+                for root, _, files in os.walk(task_dir):
+                    for file in files:
+                        drop_os_cache(os.path.join(root, file))
                 
             except Exception as e:
                 if task_id in cancel_flags:
