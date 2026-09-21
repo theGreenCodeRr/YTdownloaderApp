@@ -419,11 +419,19 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
                 print(f"Exception during {video_title}: {e}")
                 continue
 
-        # After all videos are downloaded, zip them ONCE
-        # This prevents O(N^2) disk writes and stops the OS Page Cache from ballooning RAM usage
+        # After all videos are downloaded, zip them ONCE using Python's built-in zipfile
         downloads[task_id]["progress"] = "Compressing videos into zip archive..."
-        subprocess.run(['zip', '-b', TEMP_STORAGE_DIR, '-j', '-r', output_zip_path, task_dir], check=True, stdout=subprocess.DEVNULL)
-
+        
+        with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zipf:
+            for root, _, files in os.walk(task_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    zipf.write(file_path, arcname=file)
+                    # Tell kernel to drop the source file from cache immediately after zipping
+                    drop_os_cache(file_path)
+                    
+        # Tell kernel to drop the huge zip file from RAM cache after writing it
+        drop_os_cache(output_zip_path)
 
         if os.path.exists(output_zip_path) and os.path.getsize(output_zip_path) > 22: # > 22 bytes means not an empty zip
             downloads[task_id]["status"] = "completed"
