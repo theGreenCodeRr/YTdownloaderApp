@@ -80,7 +80,7 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
     Synchronous download function meant to be run in a separate thread.
     """
     is_audio_only = format_id.startswith('audio-')
-    cmd = ['yt-dlp', '--newline', '--no-colors', '--no-playlist', '--no-check-certificate']
+    cmd = ['yt-dlp', '--newline', '--no-colors', '--no-playlist', '--no-check-certificate', '--no-cache-dir']
     cmd.extend(['-o', output_path])
     
     if is_audio_only:
@@ -96,7 +96,9 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
     
     try:
         # Run yt-dlp via subprocess to guarantee zero memory leakage in the Python process
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        env = os.environ.copy()
+        env["TMPDIR"] = TEMP_STORAGE_DIR
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
         progress_regex = re.compile(r'\[download\]\s+([\d\.]+%?)')
         
         for line in process.stdout:
@@ -180,14 +182,16 @@ import json
 # API Endpoints
 @app.post("/api/info")
 async def fetch_formats(req: URLRequest):
-    cmd = ['yt-dlp', '-J', '--no-check-certificate', '--flat-playlist']
+    cmd = ['yt-dlp', '-J', '--no-check-certificate', '--flat-playlist', '--no-cache-dir']
     if os.path.exists("cookies.txt"):
         cmd.extend(['--cookies', 'cookies.txt'])
     cmd.append(req.url)
 
     try:
         def extract():
-            output = subprocess.check_output(cmd, text=True)
+            env = os.environ.copy()
+            env["TMPDIR"] = TEMP_STORAGE_DIR
+            output = subprocess.check_output(cmd, text=True, env=env)
             return json.loads(output)
         
         info = await asyncio.to_thread(extract)
@@ -284,13 +288,15 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
     is_audio_only = format_id.startswith('audio-')
 
     try:
-        cmd = ['yt-dlp', '-J', '--no-check-certificate', '--flat-playlist']
+        cmd = ['yt-dlp', '-J', '--no-check-certificate', '--flat-playlist', '--no-cache-dir']
         if os.path.exists("cookies.txt"):
             cmd.extend(['--cookies', 'cookies.txt'])
         cmd.append(url)
         
         downloads[task_id]["progress"] = "Fetching playlist details..."
-        output = subprocess.check_output(cmd, text=True)
+        env = os.environ.copy()
+        env["TMPDIR"] = TEMP_STORAGE_DIR
+        output = subprocess.check_output(cmd, text=True, env=env)
         playlist_info = json.loads(output)
             
         # extract_flat sometimes returns 'entries' as an iterator, make sure to convert it
@@ -317,7 +323,7 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
 
             video_title = entry.get('title', f"Video_{index+1}")
 
-            cmd = ['yt-dlp', '--newline', '--no-colors', '--no-check-certificate', '--no-playlist']
+            cmd = ['yt-dlp', '--newline', '--no-colors', '--no-check-certificate', '--no-playlist', '--no-cache-dir']
             cmd.extend(['-o', os.path.join(task_dir, '%(title)s.%(ext)s')])
             
             if is_audio_only:
@@ -337,7 +343,9 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
             try:
                 # Run yt-dlp via subprocess to absolutely guarantee NO memory leaks 
                 # (yt-dlp Python API retains extractor caches in memory)
-                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                env = os.environ.copy()
+                env["TMPDIR"] = TEMP_STORAGE_DIR
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
                 progress_regex = re.compile(r'\[download\]\s+([\d\.]+%?)')
                 
                 for line in process.stdout:
@@ -355,22 +363,18 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
                     print(f"Failed to download {video_title}, return code {process.returncode}")
                     continue
                 
-                # Zip using CLI tool and force it to use TEMP_STORAGE_DIR for temp files (-b) 
-                # This prevents zip from using /tmp (RAM) for multi-gigabyte temporary files
-                for root, _, files in os.walk(task_dir):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        # -j = junk paths (don't store directories), -u = update (or create)
-                        # -b = specify temp directory so it doesn't exhaust RAM!
-                        subprocess.run(['zip', '-b', TEMP_STORAGE_DIR, '-j', '-u', output_zip_path, file_path], check=True, stdout=subprocess.DEVNULL)
-                        os.remove(file_path) # Free space immediately
-                            
             except Exception as e:
                 if task_id in cancel_flags:
                     raise Exception("Download cancelled by user")
                 # If a single video fails (e.g. unavailable), log it and continue
                 print(f"Exception during {video_title}: {e}")
                 continue
+
+        # After all videos are downloaded, zip them ONCE
+        # This prevents O(N^2) disk writes and stops the OS Page Cache from ballooning RAM usage
+        downloads[task_id]["progress"] = "Compressing videos into zip archive..."
+        subprocess.run(['zip', '-b', TEMP_STORAGE_DIR, '-j', '-r', output_zip_path, task_dir], check=True, stdout=subprocess.DEVNULL)
+
 
         if os.path.exists(output_zip_path) and os.path.getsize(output_zip_path) > 22: # > 22 bytes means not an empty zip
             downloads[task_id]["status"] = "completed"
