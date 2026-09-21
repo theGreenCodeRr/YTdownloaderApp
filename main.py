@@ -10,7 +10,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import yt_dlp
 import re
 import shutil
 import zipfile
@@ -176,24 +175,20 @@ async def periodic_cleanup():
 async def startup_event():
     asyncio.create_task(periodic_cleanup())
 
+import json
+
 # API Endpoints
 @app.post("/api/info")
 async def fetch_formats(req: URLRequest):
-    ydl_opts = {
-        'quiet': True, 
-        'nocolor': True,
-        'nocheckcertificate': True,
-        'cachedir': False,
-        'extract_flat': 'in_playlist'  # Do not download formats for every video in a playlist
-    }
-    
+    cmd = ['yt-dlp', '-J', '--no-check-certificate', '--flat-playlist']
     if os.path.exists("cookies.txt"):
-        ydl_opts['cookiefile'] = 'cookies.txt'
+        cmd.extend(['--cookies', 'cookies.txt'])
+    cmd.append(req.url)
 
     try:
         def extract():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                return ydl.extract_info(req.url, download=False)
+            output = subprocess.check_output(cmd, text=True)
+            return json.loads(output)
         
         info = await asyncio.to_thread(extract)
         
@@ -245,6 +240,8 @@ async def fetch_formats(req: URLRequest):
             "thumbnail": info.get('thumbnail', ''),
             "formats": formats_list
         }
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail="Failed to fetch video info via yt-dlp CLI")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -287,14 +284,14 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
     is_audio_only = format_id.startswith('audio-')
 
     try:
-        # 1. Fetch flat playlist info to get all video URLs
-        flat_opts = {'extract_flat': True, 'quiet': True, 'nocheckcertificate': True, 'no-check-certificate': True}
+        cmd = ['yt-dlp', '-J', '--no-check-certificate', '--flat-playlist']
         if os.path.exists("cookies.txt"):
-            flat_opts['cookiefile'] = 'cookies.txt'
+            cmd.extend(['--cookies', 'cookies.txt'])
+        cmd.append(url)
         
         downloads[task_id]["progress"] = "Fetching playlist details..."
-        with yt_dlp.YoutubeDL(flat_opts) as ydl:
-            playlist_info = ydl.extract_info(url, download=False)
+        output = subprocess.check_output(cmd, text=True)
+        playlist_info = json.loads(output)
             
         # extract_flat sometimes returns 'entries' as an iterator, make sure to convert it
         entries = list(playlist_info.get('entries', [])) if playlist_info else []
@@ -358,14 +355,13 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
                     print(f"Failed to download {video_title}, return code {process.returncode}")
                     continue
                 
-                # Zip the downloaded file(s) immediately and delete them to prevent disk bloat
-                with zipfile.ZipFile(output_zip_path, 'a', compression=zipfile.ZIP_DEFLATED) as zipf:
-                    for root, _, files in os.walk(task_dir):
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            arcname = os.path.relpath(file_path, task_dir)
-                            zipf.write(file_path, arcname)
-                            os.remove(file_path) # Free space immediately
+                # Zip using CLI tool to completely eliminate Python zipfile memory caching issues
+                for root, _, files in os.walk(task_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        # -j = junk paths (don't store directories), -u = update (or create)
+                        subprocess.run(['zip', '-j', '-u', output_zip_path, file_path], check=True, stdout=subprocess.DEVNULL)
+                        os.remove(file_path) # Free space immediately
                             
             except Exception as e:
                 if task_id in cancel_flags:
