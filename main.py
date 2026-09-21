@@ -5,7 +5,7 @@ import uuid
 import subprocess
 import ssl
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Header
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,6 +66,19 @@ class ProcessPlaylistRequest(BaseModel):
     password: str
     format_id: str
     title: str = "playlist"
+
+# --- Guardrails and Concurrency ---
+# Limit active downloads to 3 simultaneously to prevent CPU/RAM exhaustion
+download_semaphore = asyncio.Semaphore(3)
+
+def check_disk_space():
+    """Ensures there is at least 2GB of free space on the temporary storage drive."""
+    total, used, free = shutil.disk_usage(TEMP_STORAGE_DIR)
+    if free < 2 * 1024 * 1024 * 1024: # 2 GiB
+        raise HTTPException(
+            status_code=507, 
+            detail="Server has insufficient storage space to process this request right now. Please try again later."
+        )
 
 # Helper functions
 import ctypes
@@ -188,6 +201,22 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
     finally:
         cancel_flags.discard(task_id)
 
+async def queued_download_video(task_id: str, url: str, format_id: str, output_path: str, client_id: str = None):
+    """Wait in queue for a semaphore slot before downloading."""
+    if task_id in cancel_flags:
+        downloads[task_id]["status"] = "failed"
+        downloads[task_id]["error"] = "Cancelled before starting"
+        return
+        
+    downloads[task_id]["progress"] = "Waiting in queue..."
+    async with download_semaphore:
+        if task_id in cancel_flags:
+            downloads[task_id]["status"] = "failed"
+            downloads[task_id]["error"] = "Cancelled before starting"
+            return
+            
+        downloads[task_id]["progress"] = "0%"
+        await asyncio.to_thread(download_video_sync, task_id, url, format_id, output_path, client_id)
 
 # Background task to clean up old files periodically
 async def periodic_cleanup():
@@ -209,6 +238,20 @@ async def periodic_cleanup():
 
 @app.on_event("startup")
 async def startup_event():
+    # Sweep and wipe all existing files in the temporary directory on startup
+    # This prevents orphaned files from accumulating if the server crashes unexpectedly
+    try:
+        if os.path.exists(TEMP_STORAGE_DIR):
+            for filename in os.listdir(TEMP_STORAGE_DIR):
+                filepath = os.path.join(TEMP_STORAGE_DIR, filename)
+                if os.path.isfile(filepath):
+                    os.remove(filepath)
+                elif os.path.isdir(filepath):
+                    shutil.rmtree(filepath, ignore_errors=True)
+            print("Startup cleanup: Wiped all temporary files.")
+    except Exception as e:
+        print(f"Startup cleanup error: {e}")
+        
     asyncio.create_task(periodic_cleanup())
 
 import json
@@ -276,6 +319,9 @@ async def fetch_formats(req: URLRequest):
             "is_playlist": False,
             "title": info.get('title', 'video'),
             "thumbnail": info.get('thumbnail', ''),
+            "duration": info.get('duration'),
+            "uploader": info.get('uploader'),
+            "view_count": info.get('view_count'),
             "formats": formats_list
         }
     except subprocess.CalledProcessError as e:
@@ -285,6 +331,8 @@ async def fetch_formats(req: URLRequest):
 
 @app.post("/api/process")
 async def process_video(req: ProcessRequest, background_tasks: BackgroundTasks, x_client_id: str = Header(default="anonymous")):
+    check_disk_space()
+    
     task_id = str(uuid.uuid4())
     output_path = os.path.join(TEMP_STORAGE_DIR, f"{task_id}.mp4")
     
@@ -312,7 +360,7 @@ async def process_video(req: ProcessRequest, background_tasks: BackgroundTasks, 
         recent_downloads[x_client_id].pop()
     
     # Spawn background task
-    background_tasks.add_task(download_video_sync, task_id, req.url, req.format_id, output_path, x_client_id)
+    background_tasks.add_task(queued_download_video, task_id, req.url, req.format_id, output_path, x_client_id)
     
     return {"task_id": task_id}
 
@@ -455,8 +503,26 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
         if os.path.exists(task_dir):
             shutil.rmtree(task_dir, ignore_errors=True)
 
+async def queued_download_playlist(task_id: str, url: str, format_id: str, output_zip_path: str, client_id: str = None):
+    """Wait in queue for a semaphore slot before downloading."""
+    if task_id in cancel_flags:
+        downloads[task_id]["status"] = "failed"
+        downloads[task_id]["error"] = "Cancelled before starting"
+        return
+        
+    downloads[task_id]["progress"] = "Waiting in queue..."
+    async with download_semaphore:
+        if task_id in cancel_flags:
+            downloads[task_id]["status"] = "failed"
+            downloads[task_id]["error"] = "Cancelled before starting"
+            return
+            
+        await asyncio.to_thread(download_playlist_sync, task_id, url, format_id, output_zip_path, client_id)
+
 @app.post("/api/process_playlist")
 async def process_playlist(req: ProcessPlaylistRequest, background_tasks: BackgroundTasks, x_client_id: str = Header(default="anonymous")):
+    check_disk_space()
+    
     if req.password != PREMIUM_PASSWORD:
         raise HTTPException(status_code=401, detail="Invalid premium password")
         
@@ -487,7 +553,7 @@ async def process_playlist(req: ProcessPlaylistRequest, background_tasks: Backgr
     if len(recent_downloads[x_client_id]) > 50:
         recent_downloads[x_client_id].pop()
     
-    background_tasks.add_task(download_playlist_sync, task_id, req.url, req.format_id, output_zip_path, x_client_id)
+    background_tasks.add_task(queued_download_playlist, task_id, req.url, req.format_id, output_zip_path, x_client_id)
     
     return {"task_id": task_id}
 
@@ -551,10 +617,35 @@ async def download_file(task_id: str, title: str = "video", background_tasks: Ba
     
     background_tasks.add_task(delete_file_after_response, filepath, task_id)
     
-    return FileResponse(
-        path=filepath,
-        filename=filename,
-        media_type=media_type
+    file_size = os.path.getsize(filepath)
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Length": str(file_size)
+    }
+
+    def stream_file_and_drop_cache(path: str, chunk_size=1024*1024):
+        """Yields file chunks and prevents OS page cache bloat during network transfer."""
+        with open(path, "rb") as f:
+            bytes_sent = 0
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+                bytes_sent += len(chunk)
+                
+                # Every ~100MB sent over the network, force the kernel to drop the file from RAM
+                if bytes_sent >= 100 * 1024 * 1024:
+                    drop_os_cache(path)
+                    bytes_sent = 0
+                    
+            # Final sweep to ensure the entire file is dropped from cache once finished
+            drop_os_cache(path)
+
+    return StreamingResponse(
+        stream_file_and_drop_cache(filepath),
+        media_type=media_type,
+        headers=headers
     )
 
 # Frontend Serving

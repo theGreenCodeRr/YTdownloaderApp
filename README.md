@@ -1,6 +1,6 @@
 # 🎥 Web Video Downloader
 
-A modern, fast, and robust self-hosted web application for downloading videos from YouTube, Facebook, and hundreds of other platforms, built with **Python (FastAPI)**, **yt-dlp**, and a clean HTML/CSS/JS frontend.
+A modern, fast, and robust self-hosted backend application for downloading videos from YouTube, Facebook, and hundreds of other platforms, built with **Python (FastAPI)** and **yt-dlp**.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
@@ -18,14 +18,92 @@ You can test the functionality of this application before installing it yourself
 ## ✨ Features
 
 * **Universal Platform Support:** Download videos from YouTube, Facebook, and many other websites supported by `yt-dlp`.
-* **Full Playlist Downloads:** Instantly fetch an entire playlist and download it as a bundled ZIP archive. Includes transparent progress tracking showing the current video index and title being processed. Includes premium features advertisement for playlist downloading.
-* **Download Management:** Features a built-in "Recent Downloads" panel and the ability to **Cancel** ongoing downloads dynamically to save server resources.
-* **Modern UI with Thumbnails:** A beautiful, responsive interface featuring Dark Mode support, video thumbnails, and a clean layout.
+* **Full Playlist Downloads:** Instantly fetch an entire playlist and download it as a bundled ZIP archive. Includes transparent progress tracking.
+* **Download Management:** Features a built-in "Recent Downloads" tracking and the ability to **Cancel** ongoing downloads dynamically to save server resources.
 * **Advanced Audio Extraction:** Download videos directly as high-quality audio files (**MP3**, **Lossless WAV**, or **Lossless FLAC**) via server-side FFmpeg processing.
-* **Resource Optimized:** Designed to run efficiently on low-memory VPS environments by isolating each playlist video into a completely separate memory context. It dynamically zips playlist files immediately as they download, preventing both memory and disk bloat.
+* **Resource Optimized (Zero Memory Leaks):** Designed to run efficiently on low-memory VPS environments by isolating each playlist video into a completely separate memory context. It uses explicit Linux Kernel OS Cache flushing (`posix_fadvise`) to ensure massive files stream straight to disk without blowing up RAM.
+* **Stability Guardrails:** Includes Hard limits on active concurrent downloads (Semaphore limited to 3) and Disk Space validation (>2GB free space) to ensure the server never crashes.
 * **Anti-IP Block Support:** Seamlessly supports `cookies.txt` for bypassing platform IP blocks (frequent for VPS/Data Center deployments).
-* **Automated Cleanup:** Automatically purges temporary video files from the server after they are downloaded to your device, backed by a 24-hour fallback cleanup scheduler.
-* **Self-Updating Base:** Automated weekly GitHub Actions rebuild the `yt-dlp` master branch to ensure extractors are always up to date with API changes.
+* **Automated Cleanup:** Automatically purges temporary video files from the server after they are downloaded, and executes a full startup sweep when the server boots.
+
+---
+
+## 📱 Mobile App API Reference
+
+This backend is fully documented for consumption by mobile applications (React Native, Flutter, Swift, Kotlin).
+
+### 1. Fetch Video/Playlist Metadata
+`POST /api/info`
+```json
+// Request
+{
+  "url": "https://youtube.com/watch?v=..."
+}
+
+// Response (Single Video)
+{
+  "is_playlist": false,
+  "title": "Video Title",
+  "thumbnail": "url...",
+  "duration": 360,
+  "uploader": "Channel Name",
+  "view_count": 10000,
+  "formats": [
+    { "id": "audio-mp3", "ext": "mp3", "res": "Audio", "note": "High Quality MP3", "size_str": "Auto" },
+    { "id": "best", "ext": "mp4", "res": "1080p", "note": "", "size_str": "45.0 MiB" }
+  ]
+}
+```
+
+### 2. Start Single Video Download
+`POST /api/process`
+Headers: `x-client-id: <unique-device-id>`
+```json
+// Request
+{
+  "url": "https://youtube.com/watch?v=...",
+  "format_id": "best",
+  "title": "Video Title",
+  "thumbnail": "url..."
+}
+
+// Response
+{
+  "task_id": "uuid-..."
+}
+```
+
+### 3. Start Playlist Download
+`POST /api/process_playlist`
+Headers: `x-client-id: <unique-device-id>`
+```json
+// Request
+{
+  "url": "https://youtube.com/playlist?list=...",
+  "password": "premium123", // Required for playlist endpoint
+  "format_id": "audio-mp3",
+  "title": "Playlist Title"
+}
+```
+
+### 4. Poll Download Status
+`GET /api/status/{task_id}`
+```json
+// Response
+{
+  "task_id": "uuid-...",
+  "status": "processing", // "processing" | "completed" | "failed"
+  "error": null,
+  "progress": "45.2%" // For playlists: "[Video 2/10] Title - 45.2%"
+}
+```
+
+### 5. Download the File
+`GET /api/download/{task_id}?title=SafeFilename`
+This endpoint streams the file in chunks and automatically deletes it from the server when finished.
+
+### 6. Cancel a Download
+`POST /api/cancel/{task_id}`
 
 ---
 
@@ -34,27 +112,19 @@ You can test the functionality of this application before installing it yourself
 The easiest way to run the application is using Docker and Docker Compose.
 
 ### 1. Build and Run
-Open your terminal in the project directory and run:
-
 ```bash
 docker compose up --build -d
 ```
 
 ### 2. Access the App
-Open your web browser and navigate to the application (default port is `8000`):
-```
 http://localhost:8000
-```
 
 ---
 
 ## 🛠 Manual Installation (Without Docker)
 
-If you prefer to run it directly on your machine:
-
 ### 1. Install Dependencies
 Make sure you have Python 3.11+ and `ffmpeg` installed on your system.
-
 ```bash
 pip install -r requirements.txt
 ```
@@ -68,15 +138,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## 🍪 Bypassing IP Blocks (cookies.txt)
 
-If your deployment server's IP address gets blocked by the platform (e.g., throwing `KeyError('INNERTUBE_CONTEXT')` or "Failed to extract player response"):
-1. Export a `cookies.txt` file from your desktop browser using an extension like *Get cookies.txt*.
-2. Place the `cookies.txt` file directly in the root directory of this project.
-3. Restart the server/container. The app will automatically detect and use it for all future extractions.
-
----
-
-## 🔄 CI/CD & Auto-Updates
-
-This repository is configured with two GitHub Actions:
-- **Continuous Deployment (`deploy.yml`)**: Pushing to the `main` branch will automatically deploy the latest code to your self-hosted runner.
-- **Weekly Auto-Update (`weekly-update.yml`)**: Rebuilds the Docker image every week without cache to pull the absolute latest bleeding-edge version of `yt-dlp` to prevent API breakages.
+If your deployment server's IP address gets blocked by the platform:
+1. Export a `cookies.txt` file from your desktop browser.
+2. Place the `cookies.txt` file directly in the root directory.
+3. Restart the server/container. The app will automatically detect and use it.
