@@ -297,68 +297,99 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
     os.makedirs(task_dir, exist_ok=True)
     is_audio_only = format_id.startswith('audio-')
 
-    def progress_hook(d):
-        if task_id in cancel_flags:
-            raise Exception("Download cancelled by user")
-            
-        if d['status'] == 'downloading':
-            percent_str = d.get('_percent_str', '0%').strip()
-            percent_str = re.sub(r'\x1b\[[0-9;]*m', '', percent_str)
-            
-            info = d.get('info_dict', {})
-            title = info.get('title', 'Unknown Title')
-            playlist_index = info.get('playlist_index')
-            
-            if playlist_index:
-                downloads[task_id]["progress"] = f"[Video {playlist_index}] {title} - {percent_str}"
-            else:
-                downloads[task_id]["progress"] = percent_str
-
-    ydl_opts = {
-        'outtmpl': os.path.join(task_dir, '%(title)s.%(ext)s'),
-        'quiet': True,
-        'nocolor': True,
-        'yes_playlist': True,
-        'lazy_playlist': True,
-        'nocheckcertificate': True,
-        'no-check-certificate': True,
-        'cachedir': False,
-        'progress_hooks': [progress_hook],
-    }
-
-    if is_audio_only:
-        audio_codec = format_id.split('-')[1] # mp3, wav, flac
-        ydl_opts['format'] = 'bestaudio/best'
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': audio_codec,
-            'preferredquality': '192',
-        }]
-    else:
-        if format_id == 'best':
-            ydl_opts['format'] = 'bestvideo+bestaudio/best'
-            ydl_opts['merge_output_format'] = 'mp4'
-        else:
-            ydl_opts['format'] = format_id
-            ydl_opts['merge_output_format'] = 'mp4'
-
-    if os.path.exists("cookies.txt"):
-        ydl_opts['cookiefile'] = 'cookies.txt'
-
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        # 1. Fetch flat playlist info to get all video URLs
+        flat_opts = {'extract_flat': True, 'quiet': True, 'nocheckcertificate': True, 'no-check-certificate': True}
+        if os.path.exists("cookies.txt"):
+            flat_opts['cookiefile'] = 'cookies.txt'
         
-        # Manually zip files and delete them sequentially to save storage space
+        downloads[task_id]["progress"] = "Fetching playlist details..."
+        with yt_dlp.YoutubeDL(flat_opts) as ydl:
+            playlist_info = ydl.extract_info(url, download=False)
+            
+        # extract_flat sometimes returns 'entries' as an iterator, make sure to convert it
+        entries = list(playlist_info.get('entries', [])) if playlist_info else []
+        if not entries:
+            raise Exception("No videos found in playlist")
+            
+        # 2. Ensure initial zip file exists (empty)
         with zipfile.ZipFile(output_zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
-            for root, _, files in os.walk(task_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, task_dir)
-                    zipf.write(file_path, arcname)
-                    os.remove(file_path) # Free storage space immediately
-        
-        if os.path.exists(output_zip_path):
+            pass 
+
+        # 3. Iterate over entries
+        for index, entry in enumerate(entries):
+            if task_id in cancel_flags:
+                raise Exception("Download cancelled by user")
+                
+            video_url = entry.get('url') or entry.get('webpage_url')
+            if not video_url:
+                v_id = entry.get('id')
+                if v_id:
+                    video_url = f"https://www.youtube.com/watch?v={v_id}"
+                else:
+                    continue
+
+            video_title = entry.get('title', f"Video_{index+1}")
+
+            def progress_hook(d):
+                if task_id in cancel_flags:
+                    raise Exception("Download cancelled by user")
+                if d['status'] == 'downloading':
+                    percent_str = d.get('_percent_str', '0%').strip()
+                    percent_str = re.sub(r'\x1b\[[0-9;]*m', '', percent_str)
+                    downloads[task_id]["progress"] = f"[Video {index + 1}/{len(entries)}] {video_title} - {percent_str}"
+
+            ydl_opts = {
+                'outtmpl': os.path.join(task_dir, '%(title)s.%(ext)s'),
+                'quiet': True,
+                'nocolor': True,
+                'nocheckcertificate': True,
+                'no-check-certificate': True,
+                'cachedir': False,
+                'progress_hooks': [progress_hook],
+            }
+
+            if is_audio_only:
+                audio_codec = format_id.split('-')[1]
+                ydl_opts['format'] = 'bestaudio/best'
+                ydl_opts['postprocessors'] = [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': audio_codec,
+                    'preferredquality': '192',
+                }]
+            else:
+                if format_id == 'best':
+                    ydl_opts['format'] = 'bestvideo+bestaudio/best'
+                    ydl_opts['merge_output_format'] = 'mp4'
+                else:
+                    ydl_opts['format'] = format_id
+                    ydl_opts['merge_output_format'] = 'mp4'
+
+            if os.path.exists("cookies.txt"):
+                ydl_opts['cookiefile'] = 'cookies.txt'
+
+            try:
+                # Instantiate fresh YoutubeDL per video to prevent RAM accumulation leaks
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([video_url])
+                
+                # Zip the downloaded file(s) immediately and delete them to prevent disk bloat
+                with zipfile.ZipFile(output_zip_path, 'a', compression=zipfile.ZIP_DEFLATED) as zipf:
+                    for root, _, files in os.walk(task_dir):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            arcname = os.path.relpath(file_path, task_dir)
+                            zipf.write(file_path, arcname)
+                            os.remove(file_path) # Free space immediately
+                            
+            except Exception as e:
+                if task_id in cancel_flags:
+                    raise Exception("Download cancelled by user")
+                # If a single video fails (e.g. unavailable), log it and continue
+                print(f"Failed to download {video_title}: {e}")
+                continue
+
+        if os.path.exists(output_zip_path) and os.path.getsize(output_zip_path) > 22: # > 22 bytes means not an empty zip
             downloads[task_id]["status"] = "completed"
             downloads[task_id]["filepath"] = output_zip_path
             
@@ -368,7 +399,7 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
                         recent_downloads[client_id][idx]["status"] = "completed"
                         break
         else:
-            raise Exception("Failed to create zip file")
+            raise Exception("Failed to create zip file or playlist was empty")
 
     except Exception as e:
         err_msg = str(e)

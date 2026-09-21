@@ -22,7 +22,7 @@ You can test the functionality of this application before installing it yourself
 * **Download Management:** Features a built-in "Recent Downloads" panel and the ability to **Cancel** ongoing downloads dynamically to save server resources.
 * **Modern UI with Thumbnails:** A beautiful, responsive interface featuring Dark Mode support, video thumbnails, and a clean layout.
 * **Advanced Audio Extraction:** Download videos directly as high-quality audio files (**MP3**, **Lossless WAV**, or **Lossless FLAC**) via server-side FFmpeg processing.
-* **Resource Optimized:** Designed to run efficiently on low-memory VPS environments by disabling `yt-dlp`'s large memory caches (`lazy_playlist`) and dynamically zipping playlist files directly to storage to prevent disk bloat.
+* **Resource Optimized:** Designed to run efficiently on low-memory VPS environments by isolating each playlist video into a completely separate memory context. It dynamically zips playlist files immediately as they download, preventing both memory and disk bloat.
 * **Anti-IP Block Support:** Seamlessly supports `cookies.txt` for bypassing platform IP blocks (frequent for VPS/Data Center deployments).
 * **Automated Cleanup:** Automatically purges temporary video files from the server after they are downloaded to your device, backed by a 24-hour fallback cleanup scheduler.
 * **Self-Updating Base:** Automated weekly GitHub Actions rebuild the `yt-dlp` master branch to ensure extractors are always up to date with API changes.
