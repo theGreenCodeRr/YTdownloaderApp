@@ -317,7 +317,7 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
 
             video_title = entry.get('title', f"Video_{index+1}")
 
-            cmd = ['yt-dlp', '--newline', '--no-colors', '--no-check-certificate']
+            cmd = ['yt-dlp', '--newline', '--no-colors', '--no-check-certificate', '--no-playlist']
             cmd.extend(['-o', os.path.join(task_dir, '%(title)s.%(ext)s')])
             
             if is_audio_only:
