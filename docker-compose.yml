@@ -1,14 +1,36 @@
-version: '3.8'
-
 services:
   app:
     build: .
     ports:
       # Option 1 architecture: We expose the port directly on VM 200
       - "8000:8000"
+    environment:
+      # Secrets & settings come from the `.env` file next to this docker-compose.yml
+      # (Docker Compose loads it automatically). See `.env.example` for all options.
+      PREMIUM_PASSWORD: ${PREMIUM_PASSWORD:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      # IP(s) of your reverse proxy, so rate limits see the real visitor IP (read by uvicorn)
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1,172.16.0.0/12,192.168.1.0/24}
+      RATE_LIMIT_INFO: ${RATE_LIMIT_INFO:-30/60}
+      RATE_LIMIT_PROCESS: ${RATE_LIMIT_PROCESS:-10/60}
+      RATE_LIMIT_PLAYLIST: ${RATE_LIMIT_PLAYLIST:-5/3600}
+      RATE_LIMIT_PASSWORD_FAILS: ${RATE_LIMIT_PASSWORD_FAILS:-5/900}
+      MAX_ACTIVE_TASKS_PER_IP: ${MAX_ACTIVE_TASKS_PER_IP:-3}
+      SERVE_GRACE_SECONDS: ${SERVE_GRACE_SECONDS:-600}
+      YTDLP_NO_CHECK_CERTIFICATE: ${YTDLP_NO_CHECK_CERTIFICATE:-false}
+      # Fixed paths inside the container (match the volumes below)
+      TEMP_STORAGE_DIR: /var/www/ytdown
+      DB_PATH: /app/data/ytdown.db
+      COOKIES_FILE: /app/secrets/cookies.txt
     volumes:
-      # Binds the container's storage to your dedicated /var/www/ folder
+      # Binds the container's storage to your dedicated /var/www/ folder (temporary media files)
       - /var/www/ytdown:/var/www/ytdown
+      # SQLite database (download history + task state). Survives rebuilds/redeploys.
+      # Must NOT be inside /var/www/ytdown, because that folder is swept of unknown files on startup.
+      - /var/www/ytdown-data:/app/data
+      # Optional login cookies for private / age-restricted / login-only content.
+      # Put the file at ./secrets/cookies.txt next to this compose file. Mounted read-only.
+      - ./secrets:/app/secrets:ro
     dns:
       - 8.8.8.8
       - 1.1.1.1

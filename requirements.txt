@@ -1,4 +1,6 @@
 fastapi[all]
 uvicorn
-https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz
+# "default" pulls yt-dlp's optional helpers (incl. the YouTube JS challenge solver),
+# "curl-cffi" enables browser impersonation needed by Facebook/TikTok/Cloudflare-protected sites.
+yt-dlp[default,curl-cffi] @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz
 aiofiles

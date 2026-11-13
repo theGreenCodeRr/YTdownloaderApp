@@ -1,0 +1,27 @@
+# Keep secrets and runtime data OUT of the Docker image.
+# Secrets are mounted at runtime instead (see docker-compose.yml).
+.env
+.env.*
+!.env.example
+cookies.txt
+*cookies*.txt
+secrets/
+data/
+*.db
+*.db-shm
+*.db-wal
+downloads/
+tmp/
+
+# Not needed in the image
+.git
+.github
+.idea
+.vscode
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+README.md
+

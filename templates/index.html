@@ -2,431 +2,628 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#6366f1">
     <title>Web Video Downloader</title>
-    <!-- Use Inter font for a modern look -->
+    <!-- Use Inter font for a modern look (Noto Sans fallbacks render Japanese / Bengali nicely) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            box-sizing: border-box;
-        }
-        
+        *, *::before, *::after { box-sizing: border-box; }
+
         :root {
-            --bg-gradient: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%);
-            --fg-color: #1e293b;
-            --input-bg: rgba(255, 255, 255, 0.7);
-            --border-color: rgba(255, 255, 255, 0.5);
-            --primary-color: #6366f1;
-            --primary-hover: #4f46e5;
-            --list-hover: rgba(255, 255, 255, 0.6);
-            --selected-bg: rgba(99, 102, 241, 0.15);
-            --selected-border: #6366f1;
-            --success-color: #10b981;
-            --error-color: #ef4444;
-            --card-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
-            --glass-blur: blur(12px);
+            --bg: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+            --fg: #0f172a;
+            --muted: #64748b;
+            --card: rgba(255, 255, 255, 0.78);
+            --card-border: rgba(15, 23, 42, 0.08);
+            --surface: rgba(15, 23, 42, 0.04);
+            --surface-hover: rgba(15, 23, 42, 0.07);
+            --input-bg: #ffffff;
+            --input-border: rgba(15, 23, 42, 0.15);
+            --primary: #6366f1;
+            --primary-strong: #4f46e5;
+            --primary-soft: rgba(99, 102, 241, 0.12);
+            --premium: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            --success: #10b981;
+            --error: #ef4444;
+            --warning: #f59e0b;
+            --shadow: 0 10px 30px -10px rgba(30, 41, 59, 0.18);
+            --radius: 16px;
+            --radius-sm: 10px;
         }
 
         body.dark-mode {
-            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
-            --fg-color: #f8fafc;
-            --input-bg: rgba(30, 41, 59, 0.7);
-            --border-color: rgba(255, 255, 255, 0.1);
-            --primary-color: #818cf8;
-            --primary-hover: #6366f1;
-            --list-hover: rgba(255, 255, 255, 0.05);
-            --selected-bg: rgba(129, 140, 248, 0.2);
-            --selected-border: #818cf8;
-            --card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+            --bg: linear-gradient(135deg, #0b1120 0%, #1e1b4b 100%);
+            --fg: #f1f5f9;
+            --muted: #94a3b8;
+            --card: rgba(30, 41, 59, 0.72);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --surface: rgba(255, 255, 255, 0.04);
+            --surface-hover: rgba(255, 255, 255, 0.08);
+            --input-bg: rgba(15, 23, 42, 0.7);
+            --input-border: rgba(255, 255, 255, 0.14);
+            --primary: #818cf8;
+            --primary-strong: #6366f1;
+            --primary-soft: rgba(129, 140, 248, 0.18);
+            --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
         }
+
+        html { -webkit-text-size-adjust: 100%; }
 
         body {
-            font-family: 'Inter', sans-serif;
-            background: var(--bg-gradient);
+            font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', 'Noto Sans', 'Noto Sans JP', 'Noto Sans Bengali', 'Hiragino Sans', sans-serif;
+            background: var(--bg);
             background-attachment: fixed;
-            color: var(--fg-color);
+            color: var(--fg);
             margin: 0;
-            padding: 20px 10px;
-            transition: background 0.5s ease, color 0.3s ease;
-            display: flex;
-            justify-content: center;
             min-height: 100vh;
+            min-height: 100dvh;
+            line-height: 1.5;
+            transition: color 0.3s ease;
         }
 
-        .main-wrapper {
-            display: flex;
-            gap: 24px;
+        /* --- Page layout: a stable grid instead of wrapping flex boxes --- */
+        .page {
             width: 100%;
-            max-width: 1200px;
-            flex-wrap: wrap;
-            align-items: flex-start;
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 16px 12px calc(24px + env(safe-area-inset-bottom));
         }
 
-        .container, .recent-container {
-            background-color: var(--input-bg);
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 20px;
-            box-shadow: var(--card-shadow);
-            transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
-            width: 100%;
-            max-width: 100%;
-        }
-
-        .container {
-            flex: 2 1 320px;
-        }
-        
-        .recent-container {
-            flex: 1 1 280px;
-        }
-
-        @media (min-width: 768px) {
-            body {
-                padding: 40px 20px;
-            }
-            .container, .recent-container {
-                padding: 32px;
-            }
-        }
-
-        /* --- Header & Theme Toggle --- */
-        .header {
+        .app-header {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid rgba(128,128,128,0.2);
-            padding-bottom: 16px;
-            margin-bottom: 28px;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 16px;
         }
-        
-        .header h2 {
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+        .brand-logo {
+            width: 36px; height: 36px; flex: 0 0 36px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--primary) 0%, #c084fc 100%);
+            display: grid; place-items: center;
+            color: #fff; font-size: 18px;
+            box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+        }
+        .brand h1 {
             margin: 0;
+            font-size: clamp(1.1rem, 2.5vw + 0.5rem, 1.5rem);
             font-weight: 700;
-            background: linear-gradient(to right, var(--primary-color), #c084fc);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            background: linear-gradient(to right, var(--primary), #c084fc);
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
         }
 
-        .theme-switch-wrapper { display: flex; align-items: center; }
-        .theme-switch { display: inline-block; height: 28px; position: relative; width: 52px; }
-        .theme-switch input { display: none; }
-        .slider { background-color: rgba(128,128,128,0.3); bottom: 0; cursor: pointer; left: 0; position: absolute; right: 0; top: 0; transition: .4s; border-radius: 34px; }
-        .slider:before { background-color: #fff; bottom: 4px; content: ""; height: 20px; left: 4px; position: absolute; transition: .4s; width: 20px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-        input:checked + .slider { background-color: var(--primary-color); }
-        input:checked + .slider:before { transform: translateX(24px); }
+        .layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 16px;
+            align-items: start;
+        }
+        @media (min-width: 960px) {
+            .page { padding: 32px 24px 40px; }
+            .app-header { margin-bottom: 24px; }
+            .layout { grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; }
+            .sidebar { position: sticky; top: 24px; }
+        }
+
+        .card {
+            background: var(--card);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 16px;
+            min-width: 0; /* never let long titles stretch the layout */
+        }
+        @media (min-width: 640px) { .card { padding: 24px; } }
+
+        .section-title {
+            margin: 0 0 12px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--muted);
+        }
+
+        /* --- Theme Toggle --- */
+        .theme-switch { display: inline-block; height: 28px; position: relative; width: 52px; flex: 0 0 52px; }
+        .theme-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .slider { background-color: rgba(128,128,128,0.3); inset: 0; cursor: pointer; position: absolute; transition: .3s; border-radius: 34px; }
+        .slider:before { background-color: #fff; bottom: 4px; content: "☀"; font-size: 11px; display: grid; place-items: center; height: 20px; left: 4px; position: absolute; transition: .3s; width: 20px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        input:checked + .slider { background-color: var(--primary); }
+        input:checked + .slider:before { transform: translateX(24px); content: "☾"; color: #4f46e5; }
+        .theme-switch input:focus-visible + .slider { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+        /* --- Buttons --- */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 44px;           /* comfortable tap target */
+            padding: 10px 20px;
+            font: inherit;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border: none;
+            border-radius: var(--radius-sm);
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-strong) 100%);
+            color: #fff;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.28);
+        }
+        .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(99, 102, 241, 0.38); }
+        .btn:active:not(:disabled) { transform: translateY(0); }
+        .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+        .btn:disabled { background: #94a3b8; box-shadow: none; cursor: not-allowed; opacity: 0.65; }
+        .btn-block { width: 100%; }
+        .btn-premium { background: var(--premium); box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3); }
+        .btn-danger { background: var(--error); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.28); }
+        .btn-ghost {
+            background: var(--surface);
+            color: var(--fg);
+            box-shadow: none;
+            border: 1px solid var(--card-border);
+        }
+        .btn-ghost:hover:not(:disabled) { background: var(--surface-hover); box-shadow: none; }
+        .btn-sm { min-height: 34px; padding: 6px 12px; font-size: 0.82rem; border-radius: 8px; }
 
         /* --- URL Input --- */
-        .url-group { display: flex; gap: 12px; margin-bottom: 28px; flex-wrap: wrap; }
-        #urlInput {
-            flex: 1 1 200px;
-            padding: 14px 18px;
-            font-size: 16px;
-            font-family: inherit;
-            border: 1px solid rgba(128,128,128,0.3);
-            border-radius: 10px;
+        .url-group {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 10px;
+        }
+        @media (min-width: 520px) { .url-group { grid-template-columns: minmax(0, 1fr) auto; } }
+        .input-wrap { position: relative; min-width: 0; }
+        .text-input {
+            width: 100%;
+            min-height: 48px;
+            padding: 12px 44px 12px 16px;
+            font: inherit;
+            font-size: 16px; /* 16px prevents iOS zoom-on-focus */
+            border: 1px solid var(--input-border);
+            border-radius: var(--radius-sm);
             background-color: var(--input-bg);
-            color: var(--fg-color);
+            color: var(--fg);
             outline: none;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
-        #urlInput:focus {
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        .text-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+        .clear-btn {
+            position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+            width: 34px; height: 34px; border-radius: 8px; border: none;
+            background: transparent; color: var(--muted); cursor: pointer; font-size: 18px;
+            display: none;
         }
-        button {
-            padding: 14px 28px;
-            font-size: 16px;
-            font-weight: 600;
-            font-family: inherit;
-            border: none;
-            border-radius: 10px;
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
-            color: #ffffff;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-        }
-        button:hover:not(:disabled) { 
-            transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
-        }
-        button:active:not(:disabled) {
-            transform: translateY(0);
-        }
-        button:disabled { 
-            background: #94a3b8; 
-            box-shadow: none;
-            cursor: not-allowed; 
-            opacity: 0.7;
+        .clear-btn:hover { background: var(--surface-hover); }
+        .platforms {
+            margin: 10px 2px 0;
+            font-size: 0.8rem;
+            color: var(--muted);
         }
 
-        /* --- Format List & Metadata --- */
-        .video-meta {
+        /* --- Status area --- */
+        .status {
             display: none;
-            gap: 16px;
-            margin-bottom: 24px;
-            align-items: center;
-            flex-wrap: wrap;
+            margin-top: 16px;
+            padding: 12px 14px;
+            border-radius: var(--radius-sm);
+            background: var(--surface);
+            border: 1px solid var(--card-border);
+            font-size: 0.92rem;
+            overflow-wrap: anywhere;
         }
-        .video-thumb {
-            width: 140px;
-            height: 79px;
-            object-fit: cover;
-            border-radius: 10px;
+        .status.show { display: block; }
+        .status.error { color: var(--error); border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.08); }
+        .status.success { color: var(--success); border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); }
+        .status-row { display: flex; align-items: center; gap: 10px; }
+        .status-text { flex: 1 1 auto; min-width: 0; }
+
+        .loader {
+            width: 20px; height: 20px; flex: 0 0 20px;
+            border: 3px solid var(--primary-soft);
+            border-radius: 50%;
+            border-top-color: var(--primary);
+            animation: spin 0.9s linear infinite;
+            display: none;
+        }
+        .loader.show { display: block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .progress {
+            display: none;
+            width: 100%;
+            height: 8px;
+            margin-top: 10px;
             background-color: rgba(128,128,128,0.2);
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            border-radius: 999px;
+            overflow: hidden;
         }
-        .video-title-wrap {
+        .progress.show { display: block; }
+        .progress-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary) 0%, #c084fc 100%);
+            transition: width 0.3s ease;
+        }
+        .status-actions { display: none; margin-top: 12px; gap: 8px; flex-wrap: wrap; }
+        .status-actions.show { display: flex; }
+
+        /* --- Result panel --- */
+        .result { display: none; margin-top: 20px; }
+        .result.show { display: block; }
+
+        .media {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+        @media (min-width: 560px) {
+            .media.has-thumb { grid-template-columns: 200px minmax(0, 1fr); align-items: center; }
+        }
+        .media-thumb {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            object-fit: cover;
+            border-radius: 12px;
+            background-color: rgba(128,128,128,0.18);
+            display: block;
+        }
+        .media-info { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+        .badge {
+            align-self: flex-start;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: var(--primary-soft);
+            color: var(--primary);
+        }
+        .media-title {
+            margin: 0;
+            font-size: clamp(1rem, 1vw + 0.85rem, 1.2rem);
+            font-weight: 600;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .media-sub { font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }
+        .media-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+
+        /* --- Format list --- */
+        .format-group + .format-group { margin-top: 16px; }
+        .format-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 8px;
+        }
+        .format-option {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            padding: 10px 12px;
+            min-height: 64px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--card-border);
+            background: var(--surface);
+            cursor: pointer;
+            text-align: left;
+            font: inherit;
+            color: inherit;
+            transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+            min-width: 0;
+        }
+        .format-option:hover { background: var(--surface-hover); }
+        .format-option:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+        .format-option.selected {
+            border-color: var(--primary);
+            background: var(--primary-soft);
+            box-shadow: 0 0 0 1px var(--primary) inset;
+        }
+        .format-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+        .format-res { font-weight: 700; font-size: 0.98rem; }
+        .format-ext {
+            font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+            padding: 2px 6px; border-radius: 5px; background: rgba(128,128,128,0.16);
+        }
+        .format-meta {
+            font-size: 0.78rem; color: var(--muted);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .format-scroll {
+            max-height: 360px;
+            overflow-y: auto;
+            padding-right: 2px;
+        }
+
+        .sticky-action {
+            position: sticky;
+            bottom: 0;
+            margin-top: 16px;
+            padding-top: 12px;
+            padding-bottom: env(safe-area-inset-bottom);
+            background: linear-gradient(to bottom, transparent, var(--card) 30%);
+        }
+
+        /* --- Playlist --- */
+        .pl-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            background: var(--surface);
+            border: 1px solid var(--card-border);
+            margin-bottom: 10px;
+        }
+        .check-label {
+            display: inline-flex; align-items: center; gap: 10px;
+            font-weight: 600; font-size: 0.9rem; cursor: pointer; user-select: none;
+        }
+        .checkbox {
+            width: 20px; height: 20px; flex: 0 0 20px;
+            accent-color: var(--primary);
+            cursor: pointer;
+            margin: 0;
+        }
+        .pl-count { font-size: 0.85rem; color: var(--muted); }
+        .pl-filter { margin-bottom: 10px; }
+        .pl-filter .text-input { min-height: 40px; padding: 8px 12px; font-size: 15px; }
+
+        .pl-list {
+            list-style: none;
+            margin: 0;
+            padding: 0 2px 0 0;
             display: flex;
             flex-direction: column;
             gap: 6px;
-            flex-grow: 1;
+            max-height: min(56vh, 520px);
+            overflow-y: auto;
         }
-        #videoTitle {
-            font-size: 1.15rem;
-            margin: 0;
-            font-weight: 600;
-            line-height: 1.4;
+        .pl-item {
+            display: grid;
+            grid-template-columns: auto 64px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-radius: var(--radius-sm);
+            border: 1px solid transparent;
+            background: var(--surface);
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease;
         }
-        #videoType {
-            font-size: 0.85rem;
-            color: #64748b;
-            text-transform: uppercase;
-            font-weight: 700;
-            letter-spacing: 0.5px;
+        .pl-item:hover { background: var(--surface-hover); }
+        .pl-item.checked { border-color: var(--primary); background: var(--primary-soft); }
+        .pl-thumb {
+            width: 64px; aspect-ratio: 16 / 9; object-fit: cover;
+            border-radius: 6px; background: rgba(128,128,128,0.18); display: block;
         }
-        
-        #backToPlaylistBtn {
-            display: none;
-            padding: 8px 16px;
-            font-size: 14px;
-            background: rgba(128,128,128,0.2);
-            color: var(--fg-color);
-            box-shadow: none;
+        .pl-thumb.placeholder { display: grid; place-items: center; font-size: 0.78rem; color: var(--muted); font-weight: 700; }
+        .pl-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+        .pl-title {
+            font-size: 0.9rem; font-weight: 600; line-height: 1.35;
+            overflow-wrap: anywhere;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         }
-        #backToPlaylistBtn:hover {
-            background: rgba(128,128,128,0.3);
-            transform: none;
+        .pl-sub { font-size: 0.75rem; color: var(--muted); }
+        @media (max-width: 420px) {
+            .pl-item { grid-template-columns: auto minmax(0, 1fr) auto; }
+            .pl-thumb { display: none; }
         }
 
-        #formatList {
-            list-style: none;
-            padding: 0;
-            margin: 0 0 28px 0;
-            max-height: 450px;
-            overflow-y: auto;
-            border: 1px solid rgba(128,128,128,0.2);
-            border-radius: 10px;
-            display: none; /* hidden initially */
-            background: rgba(128,128,128,0.05);
+        .pl-download {
+            margin-top: 16px;
+            padding: 14px;
+            border-radius: var(--radius-sm);
+            border: 1px dashed rgba(217, 119, 6, 0.5);
+            background: rgba(245, 158, 11, 0.06);
         }
-        /* Scrollbar styles */
-        #formatList::-webkit-scrollbar { width: 8px; }
-        #formatList::-webkit-scrollbar-track { background: transparent; }
-        #formatList::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 4px; }
-        
-        #formatList li {
-            padding: 16px 20px;
+        .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .chip {
+            min-height: 36px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            border: 1px solid var(--card-border);
+            background: var(--surface);
+            color: var(--fg);
+            font: inherit; font-size: 0.85rem; font-weight: 600;
             cursor: pointer;
-            border-bottom: 1px solid rgba(128,128,128,0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
+        }
+        .chip:hover { background: var(--surface-hover); }
+        .chip.selected { background: var(--primary); border-color: var(--primary); color: #fff; }
+        .pl-actions {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
             gap: 10px;
-            transition: background-color 0.2s ease, padding-left 0.2s ease;
-            font-size: 0.95rem;
         }
-        #formatList li:last-child { border-bottom: none; }
-        #formatList li:hover { background-color: var(--list-hover); }
-        #formatList li.selected {
-            background-color: var(--selected-bg);
-            border-left: 4px solid var(--selected-border);
-            padding-left: 16px; /* account for border */
-        }
-        
-        .format-details {
-            display: flex;
-            gap: 16px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        .format-res { font-weight: 600; min-width: 60px; }
-        .format-ext { color: var(--fg-color); font-size: 0.85rem; text-transform: uppercase; background: rgba(128,128,128,0.15); padding: 4px 8px; border-radius: 6px; font-weight: 500;}
-        .format-size { font-family: monospace; font-size: 0.95rem; opacity: 0.8;}
-        .format-note { color: #64748b; font-size: 0.85rem; text-align: right; }
+        @media (min-width: 560px) { .pl-actions { grid-template-columns: minmax(0, 1fr) auto; } }
+        .pl-actions .text-input { padding-right: 16px; min-height: 44px; }
 
         /* --- Recent Downloads --- */
+        .sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+        .sidebar-head h2 { margin: 0; font-size: 1.05rem; font-weight: 700; }
         .recent-list {
             list-style: none;
             padding: 0;
             margin: 0;
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 8px;
+        }
+        @media (min-width: 960px) {
+            .recent-list { max-height: calc(100vh - 160px); overflow-y: auto; padding-right: 2px; }
         }
         .recent-item {
-            display: flex;
-            gap: 12px;
+            display: grid;
+            grid-template-columns: 64px minmax(0, 1fr) auto;
+            gap: 10px;
             align-items: center;
-            padding: 12px;
-            border-radius: 10px;
-            background: rgba(128,128,128,0.05);
-            transition: background 0.2s;
-        }
-        .recent-item:hover {
-            background: rgba(128,128,128,0.1);
+            padding: 8px;
+            border-radius: var(--radius-sm);
+            background: var(--surface);
         }
         .recent-thumb {
-            width: 80px;
-            height: 45px;
-            object-fit: cover;
-            border-radius: 6px;
-            background-color: rgba(128,128,128,0.2);
+            width: 64px; aspect-ratio: 16 / 9; object-fit: cover;
+            border-radius: 6px; background-color: rgba(128,128,128,0.18);
+            display: grid; place-items: center; font-size: 18px;
         }
-        .recent-info {
-            display: flex;
-            flex-direction: column;
-            flex-grow: 1;
-            overflow: hidden;
-            gap: 4px;
-        }
+        .recent-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
         .recent-title {
-            font-size: 0.9rem;
-            font-weight: 600;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            font-size: 0.86rem; font-weight: 600;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .recent-status {
-            font-size: 0.75rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-        }
-        .recent-btn {
-            padding: 8px 16px;
-            font-size: 0.85rem;
-            border-radius: 8px;
+        .recent-status { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+        .empty { color: var(--muted); font-size: 0.9rem; padding: 8px 2px; }
+
+        /* Scrollbars */
+        .pl-list::-webkit-scrollbar, .recent-list::-webkit-scrollbar, .format-scroll::-webkit-scrollbar { width: 8px; }
+        .pl-list::-webkit-scrollbar-thumb, .recent-list::-webkit-scrollbar-thumb, .format-scroll::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 4px; }
+
+        .hidden { display: none !important; }
+
+        /* Premium (multi-video ZIP) disabled on the server: hide checkboxes, rows open the format picker */
+        .no-premium .premium-only, .no-premium .pl-item .checkbox { display: none !important; }
+        .no-premium .pl-item { grid-template-columns: 64px minmax(0, 1fr) auto; }
+        @media (max-width: 420px) {
+            .no-premium .pl-item { grid-template-columns: minmax(0, 1fr) auto; }
         }
 
-        /* --- Status & Download Button --- */
-        #downloadButton { width: 100%; display: none; }
-        
-        #statusContainer {
-            margin-top: 24px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 16px;
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { transition: none !important; animation-duration: 0.01ms !important; }
         }
-
-        #statusText {
-            font-size: 1rem;
-            text-align: center;
-            font-weight: 500;
-            color: #64748b;
-        }
-        body.dark-mode #statusText { color: #94a3b8; }
-        
-        .status-error { color: var(--error-color) !important; }
-        .status-success { color: var(--success-color) !important; }
-
-        /* Modern Spinner */
-        .loader {
-            display: none;
-            width: 40px;
-            height: 40px;
-            border: 4px solid rgba(99, 102, 241, 0.2);
-            border-radius: 50%;
-            border-top-color: var(--primary-color);
-            animation: spin 1s ease-in-out infinite;
-        }
-        @keyframes spin { 
-            to { transform: rotate(360deg); } 
-        }
-        
-        /* Progress Bar (Determinate) */
-        .progress-container {
-            display: none;
-            width: 100%;
-            height: 8px;
-            background-color: rgba(128,128,128,0.2);
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 10px;
-        }
-        .progress-bar {
-            width: 0%;
-            height: 100%;
-            background: linear-gradient(90deg, var(--primary-color) 0%, #c084fc 100%);
-            transition: width 0.3s ease;
-        }
-
     </style>
 </head>
 <body>
+    <div class="page">
+        <header class="app-header">
+            <div class="brand">
+                <div class="brand-logo" aria-hidden="true">⬇</div>
+                <h1>Web Video Downloader</h1>
+            </div>
+            <label class="theme-switch" for="themeToggle" aria-label="Toggle dark mode">
+                <input type="checkbox" id="themeToggle" />
+                <span class="slider"></span>
+            </label>
+        </header>
 
-    <div class="main-wrapper">
-        <div class="container">
-            <div class="header">
-                <h2>Web Video Downloader</h2>
-                <div class="theme-switch-wrapper">
-                    <label class="theme-switch" for="themeToggle" aria-label="Toggle Dark Mode">
-                        <input type="checkbox" id="themeToggle" />
-                        <span class="slider"></span>
-                    </label>
+        <div class="layout">
+            <main class="card">
+                <div class="url-group">
+                    <div class="input-wrap">
+                        <input type="url" inputmode="url" id="urlInput" class="text-input"
+                               placeholder="Paste a video or playlist link…" autocomplete="off" autocapitalize="off" spellcheck="false"
+                               aria-label="Video or playlist URL">
+                        <button type="button" id="clearBtn" class="clear-btn" aria-label="Clear">×</button>
+                    </div>
+                    <button type="button" id="fetchButton" class="btn">Fetch</button>
                 </div>
-            </div>
+                <p class="platforms">Works with YouTube, Facebook, Instagram, TikTok, X/Twitter, Vimeo, Reddit, Dailymotion, SoundCloud and 1,000+ other sites.</p>
 
-            <div class="url-group">
-                <input type="text" id="urlInput" placeholder="Paste Video or Playlist URL here..." autocomplete="off">
-                <button id="fetchButton">Fetch</button>
-            </div>
-
-            <div class="video-meta" id="videoMeta">
-                <img id="videoThumb" class="video-thumb" src="" alt="Thumbnail">
-                <div class="video-title-wrap">
-                    <span id="videoType">Video</span>
-                    <h3 id="videoTitle"></h3>
+                <!-- Status / progress -->
+                <div id="status" class="status" role="status" aria-live="polite">
+                    <div class="status-row">
+                        <div id="loader" class="loader"></div>
+                        <div id="statusText" class="status-text"></div>
+                    </div>
+                    <div id="progress" class="progress"><div id="progressBar" class="progress-bar"></div></div>
+                    <div id="statusActions" class="status-actions">
+                        <button type="button" id="cancelButton" class="btn btn-danger btn-sm">Cancel download</button>
+                        <button type="button" id="retrySaveButton" class="btn btn-ghost btn-sm hidden">Save file again</button>
+                    </div>
                 </div>
-                <button id="backToPlaylistBtn">⬅ Back to Playlist</button>
-            </div>
-            
-            <div id="playlistControlsTop" style="display: none; margin-bottom: 16px;">
-                <button id="downloadPlaylistTopBtn" style="width: 100%; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">⭐ Download Entire Playlist (Premium)</button>
-            </div>
-            
-            <ul id="playlistEntries" class="recent-list" style="display: none; margin-bottom: 28px; max-height: 450px; overflow-y: auto; padding-right: 8px;"></ul>
 
-            <div id="playlistControlsBottom" style="display: none; margin-bottom: 16px;">
-                <button id="downloadPlaylistBottomBtn" style="width: 100%; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">⭐ Download Entire Playlist (Premium)</button>
-            </div>
-            
-            <ul id="formatList"></ul>
+                <!-- Result -->
+                <section id="result" class="result">
+                    <div id="media" class="media">
+                        <img id="mediaThumb" class="media-thumb hidden" alt="" referrerpolicy="no-referrer">
+                        <div class="media-info">
+                            <span id="mediaBadge" class="badge">Video</span>
+                            <h2 id="mediaTitle" class="media-title"></h2>
+                            <div id="mediaSub" class="media-sub"></div>
+                            <div class="media-actions">
+                                <button type="button" id="backToPlaylistBtn" class="btn btn-ghost btn-sm hidden">← Back to playlist</button>
+                            </div>
+                        </div>
+                    </div>
 
-            <button id="downloadButton" disabled>Download Selected Format</button>
-            <button id="premiumAdBtn" style="display: none; width: 100%; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); margin-top: 16px;">⭐ Want to download full playlists? Upgrade to Premium!</button>
+                    <!-- Single video formats -->
+                    <div id="videoPanel" class="hidden">
+                        <div class="format-scroll">
+                            <div class="format-group">
+                                <h3 class="section-title">Video</h3>
+                                <div id="videoFormats" class="format-grid" role="radiogroup" aria-label="Video formats"></div>
+                            </div>
+                            <div class="format-group">
+                                <h3 class="section-title">Audio only</h3>
+                                <div id="audioFormats" class="format-grid" role="radiogroup" aria-label="Audio formats"></div>
+                            </div>
+                        </div>
+                        <div class="sticky-action">
+                            <button type="button" id="downloadButton" class="btn btn-block" disabled>Select a format</button>
+                        </div>
+                    </div>
 
-            <div id="statusContainer">
-                <div class="loader" id="loader"></div>
-                <div class="progress-container" id="progressContainer">
-                    <div class="progress-bar" id="progressBar"></div>
+                    <!-- Playlist -->
+                    <div id="playlistPanel" class="hidden">
+                        <p id="plNoPremium" class="platforms hidden" style="margin: 0 2px 10px;">Tap a video to choose its format and download it.</p>
+                        <div class="pl-toolbar premium-only">
+                            <label class="check-label">
+                                <input type="checkbox" id="selectAll" class="checkbox"> Select all
+                            </label>
+                            <span id="plCount" class="pl-count">0 selected</span>
+                        </div>
+                        <div id="plFilterWrap" class="pl-filter hidden">
+                            <input type="search" id="plFilter" class="text-input" placeholder="Filter videos by title…" aria-label="Filter playlist">
+                        </div>
+                        <ul id="playlistEntries" class="pl-list"></ul>
+
+                        <div class="pl-download premium-only">
+                            <h3 class="section-title">⭐ Download as ZIP (Premium)</h3>
+                            <div id="plQuality" class="chip-row" role="radiogroup" aria-label="Playlist quality"></div>
+                            <div class="pl-actions">
+                                <input type="password" id="premiumPassword" class="text-input" placeholder="Premium password" autocomplete="current-password" aria-label="Premium password">
+                                <button type="button" id="downloadPlaylistBtn" class="btn btn-premium">Download selected</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+
+            <aside class="card sidebar">
+                <div class="sidebar-head">
+                    <h2>Recent Downloads</h2>
                 </div>
-                <div id="statusText"></div>
-                <button id="cancelButton" style="display: none; margin-top: 16px; background: var(--error-color); padding: 10px 20px;">Cancel Download</button>
-            </div>
-        </div>
-
-        <div class="recent-container">
-            <div class="header" style="margin-bottom: 20px;">
-                <h2>Recent Downloads</h2>
-            </div>
-            <ul class="recent-list" id="recentList">
-                <div id="historyStatusText" style="text-align: left; color: #64748b;">Loading history...</div>
-            </ul>
+                <ul class="recent-list" id="recentList">
+                    <li class="empty">Loading history…</li>
+                </ul>
+            </aside>
         </div>
     </div>
 
@@ -443,32 +640,49 @@
             'X-Client-ID': clientId
         };
 
+        // API Base
+        const API_URL = window.location.origin;
+        const $ = (id) => document.getElementById(id);
+
         // DOM Elements
-        const urlInput = document.getElementById('urlInput');
-        const fetchButton = document.getElementById('fetchButton');
-        const formatList = document.getElementById('formatList');
-        const downloadButton = document.getElementById('downloadButton');
-        const premiumAdBtn = document.getElementById('premiumAdBtn');
-        const cancelButton = document.getElementById('cancelButton');
-        const statusText = document.getElementById('statusText');
-        const loader = document.getElementById('loader');
-        const progressContainer = document.getElementById('progressContainer');
-        const progressBar = document.getElementById('progressBar');
-        
-        const videoMeta = document.getElementById('videoMeta');
-        const videoThumb = document.getElementById('videoThumb');
-        const videoTitle = document.getElementById('videoTitle');
-        const videoType = document.getElementById('videoType');
-        const backToPlaylistBtn = document.getElementById('backToPlaylistBtn');
-        
-        const playlistControlsTop = document.getElementById('playlistControlsTop');
-        const playlistControlsBottom = document.getElementById('playlistControlsBottom');
-        const playlistEntries = document.getElementById('playlistEntries');
-        const downloadPlaylistTopBtn = document.getElementById('downloadPlaylistTopBtn');
-        const downloadPlaylistBottomBtn = document.getElementById('downloadPlaylistBottomBtn');
-        
-        const themeToggle = document.getElementById('themeToggle');
-        const recentList = document.getElementById('recentList');
+        const urlInput = $('urlInput');
+        const clearBtn = $('clearBtn');
+        const fetchButton = $('fetchButton');
+        const statusBox = $('status');
+        const statusText = $('statusText');
+        const loader = $('loader');
+        const progress = $('progress');
+        const progressBar = $('progressBar');
+        const statusActions = $('statusActions');
+        const cancelButton = $('cancelButton');
+        const retrySaveButton = $('retrySaveButton');
+
+        const result = $('result');
+        const media = $('media');
+        const mediaThumb = $('mediaThumb');
+        const mediaBadge = $('mediaBadge');
+        const mediaTitle = $('mediaTitle');
+        const mediaSub = $('mediaSub');
+        const backToPlaylistBtn = $('backToPlaylistBtn');
+
+        const videoPanel = $('videoPanel');
+        const videoFormats = $('videoFormats');
+        const audioFormats = $('audioFormats');
+        const downloadButton = $('downloadButton');
+
+        const playlistPanel = $('playlistPanel');
+        const plNoPremium = $('plNoPremium');
+        const playlistEntries = $('playlistEntries');
+        const selectAll = $('selectAll');
+        const plCount = $('plCount');
+        const plFilterWrap = $('plFilterWrap');
+        const plFilter = $('plFilter');
+        const plQuality = $('plQuality');
+        const premiumPassword = $('premiumPassword');
+        const downloadPlaylistBtn = $('downloadPlaylistBtn');
+
+        const themeToggle = $('themeToggle');
+        const recentList = $('recentList');
 
         // State
         let selectedFormatId = null;
@@ -477,355 +691,456 @@
         let currentThumbnail = '';
         let currentTaskId = null;
         let pollingInterval = null;
-        let recentPollingInterval = null;
-        let isDownloadingPlaylist = false;
-        
+        let busy = false;
+
         // Playlist State Caching
-        let currentPlaylistData = null; // Stores the playlist metadata & entries
-        let currentPlaylistUrl = null; // Stores the URL of the current playlist
+        let currentPlaylistData = null;   // Stores the playlist metadata & entries
+        let currentPlaylistUrl = null;    // Stores the URL of the current playlist
+        let selectedEntries = new Set();  // indexes (into entries array) the user checked
+        let playlistFormatId = null;
+        let premiumEnabled = true;
 
-        // API Base
-        const API_URL = window.location.origin;
+        premiumPassword.value = sessionStorage.getItem('premium_pw') || '';
 
-        function setStatus(message, type = 'info') {
-            statusText.textContent = message;
-            statusText.className = '';
-            if (type === 'error') statusText.classList.add('status-error');
-            if (type === 'success') statusText.classList.add('status-success');
+        // ---------- Helpers ----------
+        function el(tag, className, text) {
+            const node = document.createElement(tag);
+            if (className) node.className = className;
+            if (text !== undefined && text !== null) node.textContent = text; // textContent = safe for any title
+            return node;
         }
 
-        function setUIState(state) {
-            if (state === 'idle') {
-                loader.style.display = 'none';
-                progressContainer.style.display = 'none';
-                fetchButton.disabled = false;
-                downloadButton.disabled = false;
-                playlistEntries.style.display = 'none';
-                playlistControlsTop.style.display = 'none';
-                playlistControlsBottom.style.display = 'none';
-            } else if (state === 'fetching') {
-                loader.style.display = 'block';
-                progressContainer.style.display = 'none';
-                fetchButton.disabled = true;
-                downloadButton.style.display = 'none';
-                premiumAdBtn.style.display = 'none';
-                cancelButton.style.display = 'none';
-                formatList.style.display = 'none';
-                videoMeta.style.display = 'none';
-                videoTitle.textContent = '';
-                backToPlaylistBtn.style.display = 'none';
-                playlistEntries.style.display = 'none';
-                playlistControlsTop.style.display = 'none';
-                playlistControlsBottom.style.display = 'none';
-                setStatus('Fetching available formats...');
-            } else if (state === 'formatting') {
-                loader.style.display = 'none';
-                progressContainer.style.display = 'none';
-                fetchButton.disabled = false;
-                downloadButton.style.display = 'block';
-                downloadButton.disabled = true;
-                cancelButton.style.display = 'none';
-                formatList.style.display = 'block';
-                videoMeta.style.display = 'flex';
-                playlistEntries.style.display = 'none';
-                playlistControlsTop.style.display = 'none';
-                playlistControlsBottom.style.display = 'none';
-                
-                // Show premium ad only if we are browsing a single video from a playlist
-                if (currentPlaylistData && backToPlaylistBtn.style.display === 'block') {
-                    premiumAdBtn.style.display = 'block';
-                } else {
-                    premiumAdBtn.style.display = 'none';
-                }
-                
-                setStatus('Select a format to download.');
-            } else if (state === 'playlist') {
-                loader.style.display = 'none';
-                progressContainer.style.display = 'none';
-                fetchButton.disabled = false;
-                downloadButton.style.display = 'none';
-                premiumAdBtn.style.display = 'none';
-                cancelButton.style.display = 'none';
-                formatList.style.display = 'none';
-                videoMeta.style.display = 'flex';
-                backToPlaylistBtn.style.display = 'none';
-                playlistEntries.style.display = 'flex';
-                playlistControlsTop.style.display = 'block';
-                playlistControlsBottom.style.display = 'block';
-                setStatus('Select a video, or download the entire playlist.', 'info');
-            } else if (state === 'server-downloading') {
-                loader.style.display = 'none';
-                progressContainer.style.display = 'block';
-                progressBar.style.width = '0%';
-                fetchButton.disabled = true;
-                downloadButton.disabled = true;
-                premiumAdBtn.style.display = 'none';
-                cancelButton.style.display = 'block';
-                setStatus('Server is downloading and processing the video...');
-            }
+        function formatDuration(sec) {
+            if (!sec && sec !== 0) return '';
+            sec = Math.round(sec);
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = sec % 60;
+            return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
         }
 
-        function renderPlaylist(data) {
-            videoTitle.textContent = `${data.title} (${data.entries ? data.entries.length : 0} videos)`;
-            currentTitle = data.title;
-            videoType.textContent = 'Playlist';
-            videoThumb.src = ''; 
-            videoThumb.style.display = 'none';
-            backToPlaylistBtn.style.display = 'none';
-            formatList.innerHTML = '';
-            playlistEntries.innerHTML = '';
-            
-            if (data.entries && data.entries.length > 0) {
-                data.entries.forEach((entry, index) => {
-                    const li = document.createElement('li');
-                    li.className = 'recent-item';
-                    li.style.cursor = 'pointer';
-                    
-                    let durText = '';
-                    if (entry.duration) {
-                        const m = Math.floor(entry.duration / 60);
-                        const s = entry.duration % 60;
-                        durText = ` - ${m}:${s.toString().padStart(2, '0')}`;
-                    }
-                    
-                    const safeTitle = (entry.title || 'video').replace(/"/g, '&quot;');
-                    const displayTitle = `${index + 1}. ${safeTitle}`;
-                    
-                    li.innerHTML = `
-                        <div class="recent-info">
-                            <span class="recent-title" title="${safeTitle}">${displayTitle}</span>
-                            <span class="recent-status" style="color: #64748b">Video${durText}</span>
-                        </div>
-                    `;
-                    
-                    li.addEventListener('click', () => {
-                        fetchFormats(entry.url, true);
-                    });
-                    
-                    playlistEntries.appendChild(li);
-                });
-            }
-            
-            if (!data.formats || data.formats.length === 0) {
-                setStatus('No video formats found.', 'error');
-                setUIState('idle');
+        function formatViews(n) {
+            if (!n && n !== 0) return '';
+            return new Intl.NumberFormat(undefined, { notation: 'compact' }).format(n) + ' views';
+        }
+
+        function setStatus(message, type = 'info', { spinner = false } = {}) {
+            if (!message) {
+                statusBox.classList.remove('show');
                 return;
             }
-            
-            data.formats.forEach(f => {
-                const li = document.createElement('li');
-                li.innerHTML = `
-                    <div class="format-details">
-                        <span class="format-res">${f.res}</span>
-                        <span class="format-ext">${f.ext}</span>
-                        <span class="format-size">${f.size_str}</span>
-                    </div>
-                    <span class="format-note">${f.note}</span>
-                `;
-                
-                li.addEventListener('click', () => {
-                    document.querySelectorAll('#formatList li.selected').forEach(el => el.classList.remove('selected'));
-                    li.classList.add('selected');
-                    selectedFormatId = f.id;
-                    downloadButton.disabled = false;
-                });
-                
-                formatList.appendChild(li);
-            });
-            
-            downloadButton.textContent = "Start Download (Premium)";
-            setUIState('playlist');
+            statusBox.className = 'status show' + (type === 'error' ? ' error' : type === 'success' ? ' success' : '');
+            statusText.textContent = message;
+            loader.classList.toggle('show', spinner);
+        }
+
+        function setProgress(percent) {
+            if (percent === null) {
+                progress.classList.remove('show');
+                return;
+            }
+            progress.classList.add('show');
+            progressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+        }
+
+        function setBusy(isBusy) {
+            busy = isBusy;
+            fetchButton.disabled = isBusy;
+            downloadButton.disabled = isBusy || !selectedFormatId;
+            updatePlaylistButton();
+        }
+
+        function showResult(kind) {
+            result.classList.add('show');
+            videoPanel.classList.toggle('hidden', kind !== 'video');
+            playlistPanel.classList.toggle('hidden', kind !== 'playlist');
+        }
+
+        function hideResult() {
+            result.classList.remove('show');
+        }
+
+        function setMedia({ badge, title, sub, thumbnail }) {
+            mediaBadge.textContent = badge;
+            mediaTitle.textContent = title || '';
+            mediaTitle.title = title || '';
+            mediaSub.textContent = sub || '';
+            if (thumbnail) {
+                mediaThumb.src = thumbnail;
+                mediaThumb.classList.remove('hidden');
+                media.classList.add('has-thumb');
+            } else {
+                mediaThumb.removeAttribute('src');
+                mediaThumb.classList.add('hidden');
+                media.classList.remove('has-thumb');
+            }
+        }
+        mediaThumb.addEventListener('error', () => {
+            mediaThumb.classList.add('hidden');
+            media.classList.remove('has-thumb');
+        });
+
+        // ---------- Single video ----------
+        function buildFormatOption(f, onSelect) {
+            const btn = el('button', 'format-option');
+            btn.type = 'button';
+            btn.setAttribute('role', 'radio');
+            btn.setAttribute('aria-checked', 'false');
+
+            const top = el('div', 'format-top');
+            top.append(el('span', 'format-res', f.res), el('span', 'format-ext', f.ext));
+            const metaParts = [f.size_str && f.size_str !== 'Auto' && f.size_str !== 'Unknown' ? f.size_str : '', f.note].filter(Boolean);
+            const meta = el('span', 'format-meta', metaParts.join(' · ') || '\u00a0');
+            meta.title = metaParts.join(' · ');
+            btn.append(top, meta);
+
+            btn.addEventListener('click', () => onSelect(btn, f));
+            return btn;
         }
 
         function renderVideoFormats(data, fromPlaylist = false) {
-            isDownloadingPlaylist = false;
-            videoTitle.textContent = data.title;
-            currentTitle = data.title;
-            videoType.textContent = 'Video';
-            videoThumb.src = data.thumbnail;
-            videoThumb.style.display = 'block';
-            currentThumbnail = data.thumbnail;
-            
-            if (fromPlaylist && currentPlaylistData) {
-                backToPlaylistBtn.style.display = 'block';
-            } else {
-                backToPlaylistBtn.style.display = 'none';
-            }
-            
-            formatList.innerHTML = '';
-            
-            if (!data.formats || data.formats.length === 0) {
-                 setStatus('No video formats found.', 'error');
-                 setUIState('idle');
-                 return;
-            }
+            currentTitle = data.title || 'video';
+            currentThumbnail = data.thumbnail || '';
+            selectedFormatId = null;
 
-            data.formats.forEach(f => {
-                const li = document.createElement('li');
-                li.innerHTML = `
-                    <div class="format-details">
-                        <span class="format-res">${f.res}</span>
-                        <span class="format-ext">${f.ext}</span>
-                        <span class="format-size">${f.size_str}</span>
-                    </div>
-                    <span class="format-note">${f.note}</span>
-                `;
-                
-                li.addEventListener('click', () => {
-                    document.querySelectorAll('#formatList li.selected').forEach(el => el.classList.remove('selected'));
-                    li.classList.add('selected');
-                    selectedFormatId = f.id;
-                    downloadButton.disabled = false;
-                });
-                
-                formatList.appendChild(li);
-            });
-            
-            downloadButton.textContent = "Download Selected Format";
-            setUIState('formatting');
-        }
+            const sub = [data.uploader, formatDuration(data.duration), formatViews(data.view_count), data.extractor].filter(Boolean).join(' · ');
+            setMedia({ badge: 'Video', title: currentTitle, sub, thumbnail: currentThumbnail });
+            backToPlaylistBtn.classList.toggle('hidden', !(fromPlaylist && currentPlaylistData));
 
-        async function fetchFormats(urlParam = null, fromPlaylist = false) {
-            const url = urlParam || urlInput.value.trim();
-            if (!url) {
-                setStatus('Please paste a Video or Playlist URL first.', 'error');
+            videoFormats.innerHTML = '';
+            audioFormats.innerHTML = '';
+
+            const formats = data.formats || [];
+            if (formats.length === 0) {
+                setStatus('No downloadable formats were found for this link.', 'error');
+                hideResult();
                 return;
             }
-            
+
+            const onSelect = (btn, f) => {
+                document.querySelectorAll('#videoPanel .format-option.selected').forEach(n => {
+                    n.classList.remove('selected');
+                    n.setAttribute('aria-checked', 'false');
+                });
+                btn.classList.add('selected');
+                btn.setAttribute('aria-checked', 'true');
+                selectedFormatId = f.id;
+                downloadButton.disabled = busy;
+                downloadButton.textContent = `Download ${f.res === 'Audio' ? f.ext.toUpperCase() : f.res}`;
+            };
+
+            let firstVideoBtn = null;
+            formats.forEach(f => {
+                const isAudio = f.kind === 'audio' || String(f.id).startsWith('audio-');
+                const btn = buildFormatOption(f, onSelect);
+                (isAudio ? audioFormats : videoFormats).appendChild(btn);
+                if (!isAudio && !firstVideoBtn) firstVideoBtn = btn;
+            });
+
+            // Pre-select "Best" so most users can download with one click
+            if (firstVideoBtn) firstVideoBtn.click();
+            else downloadButton.textContent = 'Select a format';
+
+            showResult('video');
+            setStatus('');
+        }
+
+        // ---------- Playlist ----------
+        function renderPlaylist(data) {
+            currentTitle = data.title || 'playlist';
+            const entries = data.entries || [];
+            const sub = [data.uploader, `${entries.length} videos`, data.extractor].filter(Boolean).join(' · ');
+            setMedia({ badge: 'Playlist', title: currentTitle, sub, thumbnail: (entries[0] && entries[0].thumbnail) || '' });
+            backToPlaylistBtn.classList.add('hidden');
+            playlistPanel.classList.toggle('no-premium', !premiumEnabled);
+            plNoPremium.classList.toggle('hidden', premiumEnabled);
+
+            plFilter.value = '';
+            plFilterWrap.classList.toggle('hidden', entries.length < 15);
+            renderPlaylistEntries();
+            renderPlaylistQualities(data.formats || []);
+            showResult('playlist');
+            setStatus('');
+        }
+
+        function renderPlaylistEntries() {
+            const entries = (currentPlaylistData && currentPlaylistData.entries) || [];
+            const filter = plFilter.value.trim().toLowerCase();
+            playlistEntries.innerHTML = '';
+
+            if (entries.length === 0) {
+                playlistEntries.appendChild(el('li', 'empty', 'This playlist is empty.'));
+                updateSelectionUI();
+                return;
+            }
+
+            entries.forEach((entry, i) => {
+                const title = entry.title || `Video ${i + 1}`;
+                if (filter && !title.toLowerCase().includes(filter)) return;
+
+                const li = el('li', 'pl-item' + (selectedEntries.has(i) ? ' checked' : ''));
+                const cb = el('input', 'checkbox');
+                cb.type = 'checkbox';
+                cb.checked = selectedEntries.has(i);
+                cb.setAttribute('aria-label', `Select ${title}`);
+
+                let thumb;
+                if (entry.thumbnail) {
+                    thumb = el('img', 'pl-thumb');
+                    thumb.loading = 'lazy';
+                    thumb.referrerPolicy = 'no-referrer';
+                    thumb.alt = '';
+                    thumb.src = entry.thumbnail;
+                    thumb.addEventListener('error', () => { thumb.style.visibility = 'hidden'; });
+                } else {
+                    thumb = el('div', 'pl-thumb placeholder', String(entry.index || i + 1));
+                }
+
+                const info = el('div', 'pl-info');
+                const t = el('span', 'pl-title', `${entry.index || i + 1}. ${title}`);
+                t.title = title;
+                info.append(t, el('span', 'pl-sub', formatDuration(entry.duration) || 'Video'));
+
+                const open = el('button', 'btn btn-ghost btn-sm', 'Formats');
+                open.type = 'button';
+                open.title = 'Download just this video in a specific format';
+                open.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    fetchFormats(entry.url, true);
+                });
+
+                const toggle = () => {
+                    if (!premiumEnabled) {
+                        fetchFormats(entry.url, true);
+                        return;
+                    }
+                    if (selectedEntries.has(i)) selectedEntries.delete(i); else selectedEntries.add(i);
+                    cb.checked = selectedEntries.has(i);
+                    li.classList.toggle('checked', cb.checked);
+                    updateSelectionUI();
+                };
+                cb.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+                li.addEventListener('click', toggle);
+
+                li.append(cb, thumb, info, open);
+                playlistEntries.appendChild(li);
+            });
+            updateSelectionUI();
+        }
+
+        function visibleEntryIndexes() {
+            const entries = (currentPlaylistData && currentPlaylistData.entries) || [];
+            const filter = plFilter.value.trim().toLowerCase();
+            return entries.map((e, i) => i).filter(i => !filter || (entries[i].title || '').toLowerCase().includes(filter));
+        }
+
+        function updateSelectionUI() {
+            const total = (currentPlaylistData && currentPlaylistData.entries || []).length;
+            const visible = visibleEntryIndexes();
+            const visibleSelected = visible.filter(i => selectedEntries.has(i)).length;
+            selectAll.checked = visible.length > 0 && visibleSelected === visible.length;
+            selectAll.indeterminate = visibleSelected > 0 && visibleSelected < visible.length;
+            plCount.textContent = `${selectedEntries.size} of ${total} selected`;
+            updatePlaylistButton();
+        }
+
+        function updatePlaylistButton() {
+            const total = (currentPlaylistData && currentPlaylistData.entries || []).length;
+            const n = selectedEntries.size;
+            downloadPlaylistBtn.disabled = busy || n === 0 || !playlistFormatId;
+            if (n === 0) downloadPlaylistBtn.textContent = 'Select videos to download';
+            else if (n === total) downloadPlaylistBtn.textContent = `Download all ${n} videos`;
+            else downloadPlaylistBtn.textContent = `Download ${n} selected`;
+        }
+
+        function renderPlaylistQualities(formats) {
+            plQuality.innerHTML = '';
+            playlistFormatId = null;
+            formats.forEach((f, idx) => {
+                const chip = el('button', 'chip', f.res === 'Audio' ? f.ext.toUpperCase() : f.res);
+                chip.type = 'button';
+                chip.title = f.note || '';
+                chip.setAttribute('role', 'radio');
+                chip.addEventListener('click', () => {
+                    plQuality.querySelectorAll('.chip').forEach(c => { c.classList.remove('selected'); c.setAttribute('aria-checked', 'false'); });
+                    chip.classList.add('selected');
+                    chip.setAttribute('aria-checked', 'true');
+                    playlistFormatId = f.id;
+                    updatePlaylistButton();
+                });
+                plQuality.appendChild(chip);
+                if (idx === 0) chip.click();
+            });
+        }
+
+        selectAll.addEventListener('change', () => {
+            const visible = visibleEntryIndexes();
+            if (selectAll.checked) visible.forEach(i => selectedEntries.add(i));
+            else visible.forEach(i => selectedEntries.delete(i));
+            renderPlaylistEntries();
+        });
+        plFilter.addEventListener('input', renderPlaylistEntries);
+
+        // ---------- Fetch ----------
+        async function fetchFormats(urlParam = null, fromPlaylist = false) {
+            const url = (urlParam || urlInput.value).trim();
+            if (!url) {
+                setStatus('Please paste a video or playlist link first.', 'error');
+                urlInput.focus();
+                return;
+            }
+            if (busy) return;
+
             currentUrl = url;
             selectedFormatId = null;
-            formatList.innerHTML = '';
-            setUIState('fetching');
-
             if (!fromPlaylist) {
                 currentPlaylistData = null; // Clear cached playlist if it's a completely new fetch
                 currentPlaylistUrl = null;
+                selectedEntries = new Set();
+                hideResult();
             }
+
+            setBusy(true);
+            setProgress(null);
+            statusActions.classList.remove('show');
+            setStatus(fromPlaylist ? 'Loading video formats…' : 'Fetching video information…', 'info', { spinner: true });
 
             try {
                 const response = await fetch(`${API_URL}/api/info`, {
                     method: 'POST',
                     headers: HEADERS,
-                    body: JSON.stringify({ url: url })
+                    body: JSON.stringify({ url })
                 });
 
-                if (!response.ok) {
-                    const err = await response.json();
-                    throw new Error(err.detail || 'Failed to fetch formats');
-                }
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.detail || `Server error (${response.status})`);
 
-                const data = await response.json();
-                
                 if (data.is_playlist) {
                     currentPlaylistData = data;
-                    if (!fromPlaylist) currentPlaylistUrl = url;
+                    currentPlaylistUrl = url;
+                    // Select everything by default; users can uncheck what they don't want
+                    selectedEntries = new Set((data.entries || []).map((_, i) => i));
                     renderPlaylist(data);
                 } else {
                     renderVideoFormats(data, fromPlaylist);
                 }
+                result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } catch (error) {
                 setStatus(`Error: ${error.message}`, 'error');
-                setUIState('idle');
+            } finally {
+                setBusy(false);
             }
         }
-        
+
         backToPlaylistBtn.addEventListener('click', () => {
             if (currentPlaylistData) {
+                currentUrl = currentPlaylistUrl;
                 renderPlaylist(currentPlaylistData);
             }
         });
-        
-        async function startDownload() {
+
+        // ---------- Download ----------
+        async function startTask(endpoint, body) {
+            setBusy(true);
+            retrySaveButton.classList.add('hidden');
+            cancelButton.classList.remove('hidden');
+            cancelButton.disabled = false;
+            cancelButton.textContent = 'Cancel download';
+            statusActions.classList.add('show');
+            setStatus('Starting download on the server…', 'info', { spinner: true });
+            setProgress(0);
+
+            try {
+                const response = await fetch(`${API_URL}${endpoint}`, {
+                    method: 'POST',
+                    headers: HEADERS,
+                    body: JSON.stringify(body)
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.detail || `Server error (${response.status})`);
+
+                currentTaskId = data.task_id;
+                pollStatus(data.task_id);
+                fetchRecentDownloads(); // Refresh history instantly
+            } catch (error) {
+                setStatus(`Error: ${error.message}`, 'error');
+                setProgress(null);
+                statusActions.classList.remove('show');
+                setBusy(false);
+            }
+        }
+
+        function startDownload() {
             if (!selectedFormatId || !currentUrl) {
                 setStatus('Please select a format.', 'error');
                 return;
             }
-            
-            let processUrl = `${API_URL}/api/process`;
-            let reqBody = { 
-                url: currentUrl, 
+            startTask('/api/process', {
+                url: currentUrl,
                 format_id: selectedFormatId,
                 title: currentTitle,
                 thumbnail: currentThumbnail
-            };
+            });
+        }
 
-            if (isDownloadingPlaylist) {
-                const password = prompt("This is a premium feature. Enter premium password to download the entire playlist:");
-                if (!password) {
-                    setStatus('Password is required for playlist download.', 'error');
-                    return;
-                }
-                processUrl = `${API_URL}/api/process_playlist`;
-                reqBody.url = currentPlaylistUrl || currentUrl; // Ensure we send playlist URL
-                reqBody.password = password;
-                reqBody.title = currentPlaylistData ? currentPlaylistData.title : currentTitle;
+        function startPlaylistDownload() {
+            if (!currentPlaylistData || selectedEntries.size === 0) return;
+            const password = premiumPassword.value.trim();
+            if (!password) {
+                setStatus('Please enter the premium password to download multiple videos.', 'error');
+                premiumPassword.focus();
+                return;
             }
-            
-            setUIState('server-downloading');
-            
-            try {
-                const response = await fetch(processUrl, {
-                    method: 'POST',
-                    headers: HEADERS,
-                    body: JSON.stringify(reqBody)
-                });
+            sessionStorage.setItem('premium_pw', password);
 
-                if (!response.ok) {
-                    const err = await response.json();
-                    throw new Error(err.detail || 'Failed to start download');
-                }
+            const entries = currentPlaylistData.entries || [];
+            const allSelected = selectedEntries.size === entries.length;
+            const items = [...selectedEntries].sort((a, b) => a - b).map(i => ({
+                url: entries[i].url,
+                title: entries[i].title || '',
+                index: entries[i].index || i + 1
+            }));
 
-                const data = await response.json();
-                currentTaskId = data.task_id;
-                pollStatus(data.task_id);
-                fetchRecentDownloads(); // Refresh history instantly
-
-            } catch (error) {
-                setStatus(`Error: ${error.message}`, 'error');
-                setUIState('idle');
-                downloadButton.disabled = false;
-            }
+            startTask('/api/process_playlist', {
+                url: currentPlaylistUrl || currentUrl,
+                password,
+                format_id: playlistFormatId,
+                title: currentPlaylistData.title || 'playlist',
+                // Only send the list when the user picked a subset; otherwise the server fetches the full playlist
+                items: allSelected ? null : items
+            });
         }
 
         function pollStatus(taskId) {
             if (pollingInterval) clearInterval(pollingInterval);
-            
+
             pollingInterval = setInterval(async () => {
                 try {
-                    const response = await fetch(`${API_URL}/api/status/${taskId}`, {
-                        headers: HEADERS
-                    });
-                    if (!response.ok) throw new Error("Failed to check status");
-                    
+                    const response = await fetch(`${API_URL}/api/status/${taskId}`, { headers: HEADERS });
+                    if (!response.ok) throw new Error('Lost track of the download. Please try again.');
                     const data = await response.json();
-                    
+
                     if (data.status === 'processing') {
-                        // Update progress bar
-                        if (data.progress) {
-                            const percentMatch = data.progress.match(/(\d+\.?\d*)%/);
-                            if (percentMatch) {
-                                progressBar.style.width = percentMatch[0];
-                            }
-                            setStatus(`Downloading... ${data.progress}`);
+                        let pct = typeof data.percent === 'number' ? data.percent : null;
+                        if (pct === null && data.progress) {
+                            const m = data.progress.match(/(\d+\.?\d*)%/);
+                            if (m) pct = parseFloat(m[1]);
                         }
+                        if (pct !== null) setProgress(pct);
+                        const waiting = /queue|Fetching/i.test(data.progress || '');
+                        setStatus(waiting ? data.progress : `Downloading… ${data.progress || ''}`, 'info', { spinner: true });
                     } else if (data.status === 'completed') {
                         clearInterval(pollingInterval);
-                        progressBar.style.width = '100%';
-                        setStatus('Server finished processing! Downloading to your device...', 'success');
-                        
-                        setTimeout(() => {
-                            progressContainer.style.display = 'none';
-                            triggerFileDownload(taskId);
-                            fetchRecentDownloads();
-                            
-                            // If we came from a playlist, we can show the "Back to Playlist" button nicely 
-                            // or just wait for them to click it. We'll reset UI slightly.
-                            setTimeout(() => {
-                                setUIState('formatting'); // go back to formats view
-                                if (currentPlaylistData) backToPlaylistBtn.style.display = 'block';
-                            }, 2000);
-                        }, 500);
-                        
+                        setProgress(100);
+                        const note = data.progress && data.progress.startsWith('Done.') ? ` ${data.progress}` : '';
+                        setStatus(`Ready! Saving to your device…${note}`, 'success');
+                        cancelButton.classList.add('hidden');
+                        retrySaveButton.classList.remove('hidden');
+                        retrySaveButton.onclick = () => triggerFileDownload(taskId);
+                        triggerFileDownload(taskId);
+                        fetchRecentDownloads();
+                        setBusy(false);
+                        setTimeout(() => setProgress(null), 1500);
                     } else if (data.status === 'failed') {
                         clearInterval(pollingInterval);
                         fetchRecentDownloads();
@@ -834,132 +1149,136 @@
                 } catch (error) {
                     clearInterval(pollingInterval);
                     setStatus(`Error: ${error.message}`, 'error');
-                    // Ensure buttons are reset if we failed
-                    fetchButton.disabled = false;
-                    downloadButton.disabled = false;
-                    cancelButton.style.display = 'none';
-                    premiumAdBtn.style.display = 'none';
+                    setProgress(null);
+                    statusActions.classList.remove('show');
+                    setBusy(false);
                 }
             }, 1000); // Poll every second for smoother progress updates
         }
 
         async function cancelDownload() {
             if (!currentTaskId) return;
-            
             cancelButton.disabled = true;
-            cancelButton.textContent = "Cancelling...";
-            
+            cancelButton.textContent = 'Cancelling…';
             try {
-                await fetch(`${API_URL}/api/cancel/${currentTaskId}`, {
-                    method: 'POST',
-                    headers: HEADERS
-                });
+                await fetch(`${API_URL}/api/cancel/${currentTaskId}`, { method: 'POST', headers: HEADERS });
             } catch (error) {
-                console.error("Failed to send cancel request", error);
+                console.error('Failed to send cancel request', error);
             }
-            
-            // Re-enable in case it fails, it will be hidden by pollStatus anyway on fail
-            setTimeout(() => {
-                cancelButton.disabled = false;
-                cancelButton.textContent = "Cancel Download";
-            }, 2000);
         }
 
+        // The server sets the (Unicode-safe) file name, so we don't need to pass the title.
+        // Using a temporary <a download> avoids navigating away from the app if something fails.
         function triggerFileDownload(taskId) {
-            const downloadUrl = new URL(`${API_URL}/api/download/${taskId}`);
-            downloadUrl.searchParams.append('title', currentTitle);
-            window.location.href = downloadUrl.href;
+            const a = document.createElement('a');
+            a.href = `${API_URL}/api/download/${encodeURIComponent(taskId)}`;
+            a.setAttribute('download', '');
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
         }
-        
+
+        // ---------- Recent downloads ----------
+        const STATUS_COLORS = {
+            completed: 'var(--success)',
+            failed: 'var(--error)',
+            processing: 'var(--primary)',
+            expired: 'var(--muted)'
+        };
+
         async function fetchRecentDownloads() {
             try {
-                const response = await fetch(`${API_URL}/api/recent`, {
-                    headers: HEADERS
-                });
+                const response = await fetch(`${API_URL}/api/recent`, { headers: HEADERS });
                 if (!response.ok) return;
                 const data = await response.json();
-                
+
                 recentList.innerHTML = '';
                 if (!data.recent || data.recent.length === 0) {
-                    recentList.innerHTML = '<span class="status-error" style="color: #64748b !important;">No recent downloads.</span>';
+                    recentList.appendChild(el('li', 'empty', 'No recent downloads yet.'));
                     return;
                 }
-                
+
                 data.recent.forEach(item => {
-                    const li = document.createElement('li');
-                    li.className = 'recent-item';
-                    
-                    let statusColor = '#64748b';
-                    if (item.status === 'completed') statusColor = 'var(--success-color)';
-                    if (item.status === 'failed') statusColor = 'var(--error-color)';
-                    if (item.status === 'processing') statusColor = 'var(--primary-color)';
+                    const li = el('li', 'recent-item');
 
-                    const safeTitle = (item.title || 'video').replace(/"/g, '&quot;');
+                    let thumb;
+                    if (item.thumbnail) {
+                        thumb = el('img', 'recent-thumb');
+                        thumb.alt = '';
+                        thumb.loading = 'lazy';
+                        thumb.referrerPolicy = 'no-referrer';
+                        thumb.src = item.thumbnail;
+                        thumb.addEventListener('error', () => { thumb.style.visibility = 'hidden'; });
+                    } else {
+                        thumb = el('div', 'recent-thumb', item.kind === 'playlist' ? '🗂' : String(item.format || '').startsWith('audio-') ? '🎵' : '🎬');
+                    }
 
-                    li.innerHTML = `
-                        <img class="recent-thumb" src="${item.thumbnail || 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='}" alt="thumb" onerror="this.style.display='none'">
-                        <div class="recent-info">
-                            <span class="recent-title" title="${safeTitle}">${safeTitle}</span>
-                            <span class="recent-status" style="color: ${statusColor}">${item.status.toUpperCase()}</span>
-                        </div>
-                        ${item.status === 'completed' ? `<button class="recent-btn" onclick="triggerDownloadById('${item.task_id}', '${safeTitle}')">Save</button>` : ''}
-                    `;
+                    const info = el('div', 'recent-info');
+                    const title = el('span', 'recent-title', item.title || 'video');
+                    title.title = item.title || '';
+                    const status = el('span', 'recent-status', item.status === 'expired' ? 'Expired' : item.status);
+                    status.style.color = STATUS_COLORS[item.status] || 'var(--muted)';
+                    info.append(title, status);
+
+                    li.append(thumb, info);
+                    if (item.status === 'completed') {
+                        const save = el('button', 'btn btn-sm', 'Save');
+                        save.type = 'button';
+                        save.addEventListener('click', () => triggerFileDownload(item.task_id));
+                        li.appendChild(save);
+                    } else {
+                        li.appendChild(el('span'));
+                    }
                     recentList.appendChild(li);
                 });
             } catch (e) {
-                console.error("Failed to fetch recent", e);
+                console.error('Failed to fetch recent', e);
             }
         }
-        
-        window.triggerDownloadById = function(taskId, title) {
-            const downloadUrl = new URL(`${API_URL}/api/download/${taskId}`);
-            downloadUrl.searchParams.append('title', title);
-            window.location.href = downloadUrl.href;
-        }
-        
+
+        // ---------- Theme ----------
         function toggleTheme() {
-            if (themeToggle.checked) {
-                document.body.classList.add('dark-mode');
-                localStorage.setItem('theme', 'dark');
-            } else {
-                document.body.classList.remove('dark-mode');
-                localStorage.setItem('theme', 'light');
-            }
+            document.body.classList.toggle('dark-mode', themeToggle.checked);
+            localStorage.setItem('theme', themeToggle.checked ? 'dark' : 'light');
         }
-        
-        // Listeners
+
+        // ---------- Listeners ----------
         fetchButton.addEventListener('click', () => fetchFormats());
-        urlInput.addEventListener('keypress', (e) => {
+        urlInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') fetchFormats();
         });
+        urlInput.addEventListener('input', () => {
+            clearBtn.style.display = urlInput.value ? 'block' : 'none';
+        });
+        clearBtn.addEventListener('click', () => {
+            urlInput.value = '';
+            clearBtn.style.display = 'none';
+            urlInput.focus();
+        });
         downloadButton.addEventListener('click', startDownload);
+        downloadPlaylistBtn.addEventListener('click', startPlaylistDownload);
         cancelButton.addEventListener('click', cancelDownload);
-        premiumAdBtn.addEventListener('click', () => {
-            if (currentPlaylistData) {
-                renderPlaylist(currentPlaylistData);
-            }
-        });
         themeToggle.addEventListener('change', toggleTheme);
-        downloadPlaylistTopBtn.addEventListener('click', () => {
-            isDownloadingPlaylist = true;
-            setUIState('formatting');
-        });
-        downloadPlaylistBottomBtn.addEventListener('click', () => {
-            isDownloadingPlaylist = true;
-            setUIState('formatting');
-        });
-        
+
         // Init
-        if (localStorage.getItem('theme') === 'dark' || 
+        if (localStorage.getItem('theme') === 'dark' ||
             (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             themeToggle.checked = true;
             toggleTheme();
         }
-        
-        // Start polling recent downloads
-        fetchRecentDownloads();
-        recentPollingInterval = setInterval(fetchRecentDownloads, 5000);
 
+        // Start polling recent downloads (pause while the tab is hidden)
+        fetchRecentDownloads();
+        setInterval(() => { if (!document.hidden) fetchRecentDownloads(); }, 5000);
+
+        fetch(`${API_URL}/api/health`).then(r => r.ok ? r.json() : null).then(d => {
+            if (d && typeof d.premium_enabled === 'boolean') {
+                premiumEnabled = d.premium_enabled;
+                playlistPanel.classList.toggle('no-premium', !premiumEnabled);
+                plNoPremium.classList.toggle('hidden', premiumEnabled);
+            }
+        }).catch(() => {});
     </script>
 </body>
 </html>

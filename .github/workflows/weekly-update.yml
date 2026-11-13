@@ -16,7 +16,8 @@ jobs:
 
       - name: Sync Configuration to /opt/
         run: |
-          rsync -avz --exclude '.git' ./ /opt/deployments/ytdown/
+          # Server-only files (.env, secrets/, data/) are excluded so they are never touched
+          rsync -avz --exclude '.git' --exclude '.env' --exclude 'secrets/' --exclude 'data/' --exclude 'cookies.txt' ./ /opt/deployments/ytdown/
 
       - name: Rebuild without cache to force yt-dlp update
         run: |
