@@ -7,12 +7,14 @@ import mimetypes
 import unicodedata
 import hmac
 import ipaddress
+import signal
+import socket
 import tempfile
 import threading
 from collections import defaultdict, deque
 from contextlib import contextmanager
 from typing import List, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Header, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -45,8 +47,17 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join("data", "ytdown.db"))
 SERVE_GRACE_SECONDS = int(os.environ.get("SERVE_GRACE_SECONDS", "600"))
 # Finished files that are never downloaded are removed after this long
 FILE_TTL_SECONDS = int(os.environ.get("FILE_TTL_SECONDS", "86400"))
-# History rows are kept this long
-HISTORY_TTL_SECONDS = int(os.environ.get("HISTORY_TTL_SECONDS", str(7 * 86400)))
+# History rows are kept this long (default: 24 hours)
+HISTORY_TTL_SECONDS = int(os.environ.get("HISTORY_TTL_SECONDS", "86400"))
+
+# Maximum size of any single download or playlist ZIP archive (default: 200 GB)
+MAX_DOWNLOAD_GB = int(os.environ.get("MAX_DOWNLOAD_GB", "200"))
+MAX_DOWNLOAD_BYTES = MAX_DOWNLOAD_GB * 1024 * 1024 * 1024
+MAX_PLAYLIST_ITEMS = int(os.environ.get("MAX_PLAYLIST_ITEMS", "500"))
+BLOCK_PRIVATE_URLS = _env_bool("BLOCK_PRIVATE_URLS", True)
+
+# Trusted reverse proxies whose X-Forwarded-For / CF-Connecting-IP headers are honored
+FORWARDED_ALLOW_IPS = os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1,172.16.0.0/12,192.168.1.0/24")
 
 # Max seconds to wait for yt-dlp metadata extraction
 INFO_TIMEOUT_SECONDS = int(os.environ.get("INFO_TIMEOUT_SECONDS", "120"))
@@ -207,20 +218,64 @@ def _parse_ip(value: Optional[str]) -> Optional[str]:
         return None
 
 
+def _build_trusted_proxies(raw: str):
+    trust_all = False
+    ips = set()
+    networks = []
+    literals = {"testclient"}  # allow Starlette TestClient in automated tests
+    for entry in (raw or "").split(","):
+        item = entry.strip()
+        if not item:
+            continue
+        if item == "*":
+            trust_all = True
+            continue
+        if "/" in item:
+            try:
+                networks.append(ipaddress.ip_network(item, strict=False))
+                continue
+            except ValueError:
+                pass
+        try:
+            ips.add(ipaddress.ip_address(item))
+        except ValueError:
+            literals.add(item)
+    return trust_all, ips, networks, literals
+
+
+_TRUST_ALL_PROXIES, _TRUSTED_PROXY_IPS, _TRUSTED_PROXY_NETWORKS, _TRUSTED_PROXY_LITERALS = _build_trusted_proxies(
+    FORWARDED_ALLOW_IPS
+)
+
+
+def _is_trusted_proxy(host: Optional[str]) -> bool:
+    if _TRUST_ALL_PROXIES or host is None:
+        return True
+    if host in _TRUSTED_PROXY_LITERALS:
+        return True
+    try:
+        addr = ipaddress.ip_address(host.split("%", 1)[0])
+    except ValueError:
+        return False
+    return addr in _TRUSTED_PROXY_IPS or any(addr in net for net in _TRUSTED_PROXY_NETWORKS)
+
+
 def client_ip(request: Request) -> str:
-    # Behind Cloudflare -> Nginx Proxy -> Docker:
-    # CF-Connecting-IP holds the original visitor IP; X-Forwarded-For's leftmost
-    # entry or X-Real-IP are checked next before falling back to request.client.host.
-    candidates = [
-        request.headers.get("cf-connecting-ip"),
-        (request.headers.get("x-forwarded-for") or "").split(",")[0],
-        request.headers.get("x-real-ip"),
-    ]
-    for candidate in candidates:
-        parsed = _parse_ip(candidate)
-        if parsed:
-            return parsed
-    return request.client.host if request.client else "unknown"
+    peer = request.client.host if request.client else None
+    if _is_trusted_proxy(peer):
+        # Behind Cloudflare -> Nginx Proxy -> Docker:
+        # CF-Connecting-IP holds the original visitor IP; X-Forwarded-For's leftmost
+        # entry or X-Real-IP are checked next before falling back to request.client.host.
+        candidates = [
+            request.headers.get("cf-connecting-ip"),
+            (request.headers.get("x-forwarded-for") or "").split(",")[0],
+            request.headers.get("x-real-ip"),
+        ]
+        for candidate in candidates:
+            parsed = _parse_ip(candidate)
+            if parsed:
+                return parsed
+    return peer or "unknown"
 
 def rate_limit(bucket: str, limit_window):
     limit, window = limit_window
@@ -450,6 +505,28 @@ def drop_os_cache(filepath: str):
 
 PROGRESS_REGEX = re.compile(r'\[download\]\s+([\d\.]+)%')
 POSTPROCESS_MARKERS = ('[Merger]', '[ExtractAudio]', '[VideoConvertor]', '[FixupM3u8]', '[FixupM4a]', '[ffmpeg]')
+ALLOWED_AUDIO_FORMATS = {'audio-mp3', 'audio-wav', 'audio-flac', 'audio-m4a', 'audio-opus'}
+FORMAT_ID_RE = re.compile(r'^[A-Za-z0-9._\-]{1,64}$')
+
+
+def _terminate_process(process):
+    """Terminate yt-dlp and any child processes (ffmpeg/deno) in its process group."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except Exception:
+        try:
+            process.terminate()
+        except Exception:
+            pass
+
+
+def validate_format_id(format_id: str) -> str:
+    fmt = (format_id or "").strip()
+    playlist_ids = {f["id"] for f in PLAYLIST_FORMATS}
+    if fmt == 'best' or fmt in ALLOWED_AUDIO_FORMATS or fmt in playlist_ids or FORMAT_ID_RE.fullmatch(fmt):
+        return fmt
+    raise HTTPException(status_code=400, detail="Invalid format selection.")
+
 
 def build_format_args(format_id: str):
     """Translate a UI format id into yt-dlp format arguments."""
@@ -473,19 +550,21 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
     """
     Synchronous download function meant to be run in a separate thread.
     """
-    args = ['--newline', '--no-colors', '--no-playlist', '--limit-rate', '50M', '-o', output_path]
+    args = ['--newline', '--no-colors', '--no-playlist', '--limit-rate', '50M',
+            '--max-filesize', f'{MAX_DOWNLOAD_GB}G', '-o', output_path]
     args += build_format_args(format_id)
-    args.append(url)
+    args.extend(['--', url])
     
     try:
         # Run yt-dlp via subprocess with a strict context manager to guarantee pipe cleanup
         tail = []
         with yt_dlp_command(*args) as cmd, \
              subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                              encoding='utf-8', errors='replace', env=yt_dlp_env()) as process:
+                              encoding='utf-8', errors='replace', env=yt_dlp_env(),
+                              start_new_session=True) as process:
             for line in process.stdout:
                 if task_id in cancel_flags:
-                    process.terminate()
+                    _terminate_process(process)
                     raise Exception("Download cancelled by user")
 
                 tail.append(line)
@@ -514,7 +593,11 @@ def download_video_sync(task_id: str, url: str, format_id: str, output_path: str
             # Found the completed file (prefer the largest one if leftovers exist)
             possible_files.sort(key=lambda f: os.path.getsize(os.path.join(TEMP_STORAGE_DIR, f)), reverse=True)
             actual_path = os.path.join(TEMP_STORAGE_DIR, possible_files[0])
-            
+            if os.path.getsize(actual_path) > MAX_DOWNLOAD_BYTES:
+                _remove_path(actual_path)
+                fail_task(task_id, f"Download exceeded the {MAX_DOWNLOAD_GB} GB limit.")
+                return
+
             # Immediately force Linux to drop this file from RAM to prevent Page Cache ballooning
             drop_os_cache(actual_path)
             finish_task(task_id, "completed", filepath=actual_path)
@@ -738,9 +821,56 @@ def _entry_thumbnail(entry: dict) -> str:
         return thumbs[-1].get('url') or ''
     return ''
 
-def run_info_extraction(url: str) -> dict:
+def _is_disallowed_ip(ip_str: str) -> bool:
     try:
-        with yt_dlp_command('-J', '--flat-playlist', url) as cmd:
+        ip = ipaddress.ip_address(ip_str.split("%", 1)[0])
+    except ValueError:
+        return False
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def validate_url(url: str, resolve_dns: bool = False) -> str:
+    url = (url or "").strip()
+    if not re.match(r'^https?://', url, re.IGNORECASE) or len(url) > 2048:
+        raise HTTPException(status_code=400, detail="Please enter a valid link starting with http:// or https://")
+
+    parsed = urlsplit(url)
+    hostname = parsed.hostname
+    if parsed.scheme.lower() not in ("http", "https") or not hostname:
+        raise HTTPException(status_code=400, detail="Please enter a valid link starting with http:// or https://")
+
+    if BLOCK_PRIVATE_URLS:
+        host_lower = hostname.lower().rstrip(".")
+        if host_lower in ("localhost", "localhost.localdomain") or host_lower.endswith((".local", ".internal", ".lan")):
+            raise HTTPException(status_code=400, detail="Links to private or local network addresses are not allowed.")
+
+        if _parse_ip(hostname.split("%", 1)[0]) is not None:
+            if _is_disallowed_ip(hostname):
+                raise HTTPException(status_code=400, detail="Links to private or local network addresses are not allowed.")
+        elif resolve_dns:
+            try:
+                infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+            except socket.gaierror:
+                infos = []
+            for info in infos:
+                addr = info[4][0]
+                if _is_disallowed_ip(addr):
+                    raise HTTPException(status_code=400, detail="Links to private or local network addresses are not allowed.")
+
+    return url
+
+
+def run_info_extraction(url: str) -> dict:
+    url = validate_url(url, resolve_dns=True)
+    try:
+        with yt_dlp_command('-J', '--flat-playlist', '--', url) as cmd:
             result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace',
                                     env=yt_dlp_env(), timeout=INFO_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
@@ -749,11 +879,6 @@ def run_info_extraction(url: str) -> dict:
         raise HTTPException(status_code=422, detail=extract_yt_dlp_error(result.stderr or result.stdout))
     return json.loads(result.stdout)
 
-def validate_url(url: str) -> str:
-    url = (url or "").strip()
-    if not re.match(r'^https?://', url, re.IGNORECASE) or len(url) > 2048:
-        raise HTTPException(status_code=400, detail="Please enter a valid link starting with http:// or https://")
-    return url
 
 # API Endpoints
 @app.get("/api/health")
@@ -765,6 +890,7 @@ async def health():
         "js_runtime": bool(shutil.which("deno") or shutil.which("node")),
         "cookies_loaded": find_cookies_file() is not None,
         "premium_enabled": bool(PREMIUM_PASSWORD),
+        "max_download_gb": MAX_DOWNLOAD_GB,
         "active_downloads": len(downloads),
     }
 
@@ -819,7 +945,8 @@ async def fetch_formats(req: URLRequest, _rl: None = rate_limit("info", RATE_LIM
 async def process_video(req: ProcessRequest, request: Request, background_tasks: BackgroundTasks,
                         x_client_id: str = Header(default="anonymous"),
                         _rl: None = rate_limit("process", RATE_LIMIT_PROCESS)):
-    url = validate_url(req.url)
+    url = validate_url(req.url, resolve_dns=True)
+    format_id = validate_format_id(req.format_id)
     ip = client_ip(request)
     check_active_limit(ip)
     check_disk_space()
@@ -829,10 +956,10 @@ async def process_video(req: ProcessRequest, request: Request, background_tasks:
     
     # Save to history (persisted)
     register_task(task_id, ip, x_client_id[:64], kind="video", title=req.title[:500],
-                  thumbnail=req.thumbnail[:2048], format_id=req.format_id[:200], url=url)
+                  thumbnail=req.thumbnail[:2048], format_id=format_id[:200], url=url)
     
     # Spawn background task
-    background_tasks.add_task(run_queued, task_id, download_video_sync, url, req.format_id, output_path)
+    background_tasks.add_task(run_queued, task_id, download_video_sync, url, format_id, output_path)
     
     return {"task_id": task_id}
 
@@ -856,39 +983,48 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
 
         if not entries:
             raise Exception("No videos found in playlist")
+        if len(entries) > MAX_PLAYLIST_ITEMS:
+            raise Exception(f"Playlist has too many videos ({len(entries)}). Maximum allowed is {MAX_PLAYLIST_ITEMS}.")
 
         total = len(entries)
         failed_titles = []
+        media_count = 0
         pad = max(2, len(str(max((e.get('index') or 0) for e in entries) or total)))
 
         # Iterate over entries
         for position, entry in enumerate(entries):
             if task_id in cancel_flags:
                 raise Exception("Download cancelled by user")
-                
+
+            if shutil.disk_usage(TEMP_STORAGE_DIR).free < 2 * 1024 * 1024 * 1024:
+                raise Exception("Server ran out of free disk space.")
+
             video_url = entry.get('url')
             if not video_url:
                 continue
+            video_url = validate_url(video_url, resolve_dns=True)
 
             video_title = entry.get('title') or f"Video {position + 1}"
             number = entry.get('index') or (position + 1)
 
-            args = ['--newline', '--no-colors', '--no-playlist', '--limit-rate', '50M']
+            args = ['--newline', '--no-colors', '--no-playlist', '--limit-rate', '50M',
+                    '--max-filesize', f'{MAX_DOWNLOAD_GB}G']
             # Number files so they stay in playlist order. `.150B` truncates long titles by bytes,
             # which prevents "File name too long" errors for Japanese/Bengali titles.
             args += ['-o', os.path.join(task_dir, f'{str(number).zfill(pad)} - %(title).150B.%(ext)s')]
             args += build_format_args(format_id)
-            args.append(video_url)
+            args.extend(['--', video_url])
 
             try:
                 # Run yt-dlp via subprocess to absolutely guarantee NO memory leaks 
                 # (yt-dlp Python API retains extractor caches in memory)
                 with yt_dlp_command(*args) as cmd, \
                      subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                      encoding='utf-8', errors='replace', env=yt_dlp_env()) as process:
+                                      encoding='utf-8', errors='replace', env=yt_dlp_env(),
+                                      start_new_session=True) as process:
                     for line in process.stdout:
                         if task_id in cancel_flags:
-                            process.terminate()
+                            _terminate_process(process)
                             raise Exception("Download cancelled by user")
                             
                         match = PROGRESS_REGEX.search(line)
@@ -904,50 +1040,59 @@ def download_playlist_sync(task_id: str, url: str, format_id: str, output_zip_pa
                 if process.returncode != 0 and task_id not in cancel_flags:
                     print(f"Failed to download {video_title}, return code {process.returncode}")
                     failed_titles.append(video_title)
-                    continue
-                
-                # yt-dlp sanitizes titles (removes emojis, slashes, etc.) from filenames.
-                # To guarantee we drop the cache regardless of the final filename, 
-                # we simply drop the cache for EVERY file currently in the task directory.
-                for root, _, files in os.walk(task_dir):
-                    for file in files:
-                        drop_os_cache(os.path.join(root, file))
-                
+                else:
+                    # Pack each video into the ZIP immediately and delete the source file
+                    # right away so peak disk usage stays 1x instead of 2x.
+                    # ZIP_STORED: video/audio is already compressed, deflating only burns CPU for ~0% gain.
+                    with zipfile.ZipFile(output_zip_path, 'a', zipfile.ZIP_STORED, allowZip64=True) as zipf:
+                        for root, _, files in os.walk(task_dir):
+                            for file in sorted(files):
+                                file_path = os.path.join(root, file)
+                                if file.endswith(('.part', '.ytdl', '.temp')) or '.part-' in file:
+                                    _remove_path(file_path)
+                                    continue
+                                current_zip_size = os.path.getsize(output_zip_path) if os.path.exists(output_zip_path) else 0
+                                if current_zip_size + os.path.getsize(file_path) > MAX_DOWNLOAD_BYTES:
+                                    _remove_path(file_path)
+                                    raise Exception(f"Playlist exceeded the maximum allowed size of {MAX_DOWNLOAD_GB} GB.")
+                                zipf.write(file_path, arcname=file)
+                                media_count += 1
+                                drop_os_cache(file_path)
+                                _remove_path(file_path)
+
+                    drop_os_cache(output_zip_path)
+                    if os.path.exists(output_zip_path) and os.path.getsize(output_zip_path) > MAX_DOWNLOAD_BYTES:
+                        raise Exception(f"Playlist exceeded the maximum allowed size of {MAX_DOWNLOAD_GB} GB.")
+
+            except HTTPException as e:
+                print(f"Blocked URL during playlist {video_title}: {e.detail}")
+                failed_titles.append(video_title)
+                continue
             except Exception as e:
-                if task_id in cancel_flags:
-                    raise Exception("Download cancelled by user")
+                if task_id in cancel_flags or "maximum allowed size" in str(e) or "free disk space" in str(e):
+                    raise
                 # If a single video fails (e.g. unavailable), log it and continue
                 print(f"Exception during {video_title}: {e}")
                 failed_titles.append(video_title)
                 continue
-
-        if failed_titles:
-            # Leave a note inside the zip so the user knows what was skipped
-            with open(os.path.join(task_dir, "_skipped_videos.txt"), "w", encoding="utf-8") as fh:
-                fh.write("These videos could not be downloaded (private, removed or region-locked):\n\n")
-                fh.write("\n".join(failed_titles))
-
-        # After all videos are downloaded, zip them ONCE using Python's built-in zipfile.
-        # ZIP_STORED: video/audio is already compressed, deflating only burns CPU for ~0% gain.
-        set_progress(task_id, "Packing videos into zip archive...", 99.0)
-        
-        media_count = 0
-        with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_STORED, allowZip64=True) as zipf:
-            for root, _, files in os.walk(task_dir):
-                for file in sorted(files):
-                    if file.endswith(('.part', '.ytdl')):
-                        continue
-                    file_path = os.path.join(root, file)
-                    zipf.write(file_path, arcname=file)
-                    if not file.startswith('_skipped'):
-                        media_count += 1
-                    # Tell kernel to drop the source file from cache immediately after zipping
-                    drop_os_cache(file_path)
-                    
-        # Tell kernel to drop the huge zip file from RAM cache after writing it
-        drop_os_cache(output_zip_path)
+            finally:
+                # Clean out any partial files before the next video starts
+                for root, _, files in os.walk(task_dir):
+                    for file in files:
+                        _remove_path(os.path.join(root, file))
 
         if media_count > 0:
+            if failed_titles:
+                # Leave a note inside the zip so the user knows what was skipped
+                skipped_path = os.path.join(task_dir, "_skipped_videos.txt")
+                with open(skipped_path, "w", encoding="utf-8") as fh:
+                    fh.write("These videos could not be downloaded (private, removed or region-locked):\n\n")
+                    fh.write("\n".join(failed_titles))
+                with zipfile.ZipFile(output_zip_path, 'a', zipfile.ZIP_STORED, allowZip64=True) as zipf:
+                    zipf.write(skipped_path, arcname="_skipped_videos.txt")
+                _remove_path(skipped_path)
+                drop_os_cache(output_zip_path)
+
             note = f"Done. {len(failed_titles)} of {total} video(s) could not be downloaded." if failed_titles else None
             finish_task(task_id, "completed", filepath=output_zip_path, note=note)
         else:
@@ -983,12 +1128,20 @@ async def process_playlist(req: ProcessPlaylistRequest, request: Request, backgr
         limiter.add(fail_key)
         raise HTTPException(status_code=401, detail="Invalid premium password")
 
-    url = validate_url(req.url)
+    url = validate_url(req.url, resolve_dns=True)
+    format_id = validate_format_id(req.format_id)
+    if req.items and len(req.items) > MAX_PLAYLIST_ITEMS:
+        raise HTTPException(status_code=400, detail=f"Too many videos selected (maximum {MAX_PLAYLIST_ITEMS}).")
+
+    items = []
+    for raw_item in (req.items or []):
+        item_dict = raw_item.model_dump() if hasattr(raw_item, "model_dump") else raw_item.dict()
+        if item_dict.get("url"):
+            item_dict["url"] = validate_url(item_dict["url"], resolve_dns=False)
+            items.append(item_dict)
+
     check_active_limit(ip)
     check_disk_space()
-
-    items = [i.model_dump() if hasattr(i, "model_dump") else i.dict() for i in (req.items or [])]
-    items = [i for i in items if i.get("url", "").startswith(("http://", "https://"))]
         
     task_id = str(uuid.uuid4())
     output_zip_path = os.path.join(TEMP_STORAGE_DIR, f"{task_id}.zip")
@@ -998,16 +1151,34 @@ async def process_playlist(req: ProcessPlaylistRequest, request: Request, backgr
         display_title = f"{display_title} ({len(items)} selected)"
     
     register_task(task_id, ip, x_client_id[:64], kind="playlist", title=display_title,
-                  thumbnail="", format_id=req.format_id[:200], url=url, media_type="application/zip")
+                  thumbnail="", format_id=format_id[:200], url=url, media_type="application/zip")
     
-    background_tasks.add_task(run_queued, task_id, download_playlist_sync, url, req.format_id, output_zip_path, items)
+    background_tasks.add_task(run_queued, task_id, download_playlist_sync, url, format_id, output_zip_path, items)
     
     return {"task_id": task_id}
 
 @app.get("/api/recent")
 async def get_recent(x_client_id: str = Header(default="anonymous")):
-    recent = await asyncio.to_thread(store.recent_for_client, x_client_id[:64], 50)
+    recent = await asyncio.to_thread(store.recent_for_client, x_client_id[:64], 50, HISTORY_TTL_SECONDS)
     return {"recent": recent}
+
+async def _clear_recent_impl(x_client_id: str):
+    removed = await asyncio.to_thread(store.clear_client_history, x_client_id[:64])
+    for row in removed:
+        pending = _pending_deletions.pop(row["task_id"], None)
+        if pending and not pending.done():
+            pending.cancel()
+        if row.get("filepath"):
+            await asyncio.to_thread(_remove_path, row["filepath"])
+    return {"cleared": len(removed)}
+
+@app.post("/api/recent/clear")
+async def clear_recent_post(x_client_id: str = Header(default="anonymous")):
+    return await _clear_recent_impl(x_client_id)
+
+@app.delete("/api/recent")
+async def clear_recent_delete(x_client_id: str = Header(default="anonymous")):
+    return await _clear_recent_impl(x_client_id)
 
 @app.get("/api/status/{task_id}")
 async def get_status(task_id: str):
@@ -1024,10 +1195,16 @@ async def get_status(task_id: str):
     }
 
 @app.post("/api/cancel/{task_id}")
-async def cancel_download(task_id: str):
+async def cancel_download(task_id: str, x_client_id: str = Header(default="anonymous")):
     task = store.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    if (
+        task.get("client_id") not in (None, "", "anonymous")
+        and x_client_id != "anonymous"
+        and task["client_id"] != x_client_id[:64]
+    ):
+        raise HTTPException(status_code=403, detail="Not authorized to cancel this download.")
     
     if task["status"] == "processing" and task_id in downloads:
         cancel_flags.add(task_id)
@@ -1048,20 +1225,65 @@ async def _delayed_delete(filepath: str, task_id: str, delay: float = SERVE_GRAC
 
 async def schedule_file_deletion(filepath: str, task_id: str):
     """
-    Callback run after the file has been served. Instead of deleting immediately, keep the
-    file for a short grace period so the user can re-download it (mobile browsers sometimes
-    request a download twice). Spawned as a separate task so it doesn't hold the HTTP connection.
-    The served time is persisted, so the deletion is re-scheduled after a restart.
+    Callback run after the file has finished streaming. Keeps the file for SERVE_GRACE_SECONDS
+    so mobile browsers or retries can resume/re-download. The served timestamp is persisted
+    after streaming ends so the grace timer doesn't expire during long transfers.
     """
     if task_id in _pending_deletions:
         return
     if SERVE_GRACE_SECONDS <= 0:
         _delete_file_now(filepath, task_id)
         return
+    store.update_task(task_id, served_at=time.time())
     _pending_deletions[task_id] = asyncio.create_task(_delayed_delete(filepath, task_id))
 
+
+def _parse_byte_range(range_header: str, file_size: int):
+    match = re.fullmatch(r'bytes=(\d*)-(\d*)', (range_header or "").strip())
+    if not match or file_size <= 0:
+        raise HTTPException(
+            status_code=416,
+            detail="Requested range not satisfiable",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+    start_str, end_str = match.groups()
+    if start_str == "" and end_str == "":
+        raise HTTPException(
+            status_code=416,
+            detail="Requested range not satisfiable",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+    if start_str == "":
+        suffix = int(end_str)
+        if suffix <= 0:
+            raise HTTPException(
+                status_code=416,
+                detail="Requested range not satisfiable",
+                headers={"Content-Range": f"bytes */{file_size}"},
+            )
+        start = max(0, file_size - suffix)
+        end = file_size - 1
+    else:
+        start = int(start_str)
+        if start >= file_size:
+            raise HTTPException(
+                status_code=416,
+                detail="Requested range not satisfiable",
+                headers={"Content-Range": f"bytes */{file_size}"},
+            )
+        end = int(end_str) if end_str else file_size - 1
+        if end < start:
+            raise HTTPException(
+                status_code=416,
+                detail="Requested range not satisfiable",
+                headers={"Content-Range": f"bytes */{file_size}"},
+            )
+        end = min(end, file_size - 1)
+    return start, end
+
+
 @app.get("/api/download/{task_id}")
-async def download_file(task_id: str, background_tasks: BackgroundTasks, title: str = None):
+async def download_file(task_id: str, request: Request, background_tasks: BackgroundTasks, title: str = None):
     task = store.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -1074,45 +1296,70 @@ async def download_file(task_id: str, background_tasks: BackgroundTasks, title: 
     if not filepath or not os.path.exists(filepath):
         store.update_task(task_id, status="expired")
         raise HTTPException(status_code=410, detail="This file has expired. Please download it again.")
-    
+
+    # Cancel any pending deletion timer while a new transfer/resume is running;
+    # schedule_file_deletion will re-arm it once streaming finishes.
+    pending = _pending_deletions.pop(task_id, None)
+    if pending and not pending.done():
+        pending.cancel()
+
     # Use the real extension of the produced file (mp4, mp3, wav, flac, zip ...)
     ext = os.path.splitext(filepath)[1] or ".mp4"
     media_type = task.get("media_type") or mimetypes.guess_type(f"file{ext}")[0] or "application/octet-stream"
     # Keep non-English characters (Japanese, Bengali, ...) in the file name
     filename = f"{sanitize_filename(task.get('title') or title or 'video')}{ext}"
 
-    if not task.get("served_at"):
-        store.update_task(task_id, served_at=time.time())
-    background_tasks.add_task(schedule_file_deletion, filepath, task_id)
-    
     file_size = os.path.getsize(filepath)
+    range_header = request.headers.get("range")
+    if range_header:
+        start, end = _parse_byte_range(range_header, file_size)
+        status_code = 206
+    else:
+        start = 0
+        end = max(0, file_size - 1)
+        status_code = 200
+
+    content_length = (end - start + 1) if file_size > 0 else 0
     headers = {
         # RFC 5987 encoding: plain `filename="日本語.mp4"` crashes because HTTP headers must be latin-1
         "Content-Disposition": content_disposition(filename),
-        "Content-Length": str(file_size)
+        "Content-Length": str(content_length),
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-store",
+        "X-Accel-Buffering": "no",
     }
+    if status_code == 206:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
 
-    def stream_file_and_drop_cache(path: str, chunk_size=1024*1024):
-        """Yields file chunks and prevents OS page cache bloat during network transfer."""
-        with open(path, "rb") as f:
-            bytes_sent = 0
-            while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                yield chunk
-                bytes_sent += len(chunk)
-                
-                # Every ~100MB sent over the network, force the kernel to drop the file from RAM
-                if bytes_sent >= 100 * 1024 * 1024:
-                    drop_os_cache(path)
-                    bytes_sent = 0
-                    
-            # Final sweep to ensure the entire file is dropped from cache once finished
+    background_tasks.add_task(schedule_file_deletion, filepath, task_id)
+
+    def stream_file_and_drop_cache(path: str, offset: int, length: int, chunk_size=1024*1024):
+        """Yields file chunks in [offset, offset + length) and prevents OS page cache bloat."""
+        try:
+            with open(path, "rb") as f:
+                if offset > 0:
+                    f.seek(offset)
+                remaining = length
+                bytes_sent = 0
+                while remaining > 0:
+                    chunk = f.read(min(chunk_size, remaining))
+                    if not chunk:
+                        break
+                    yield chunk
+                    remaining -= len(chunk)
+                    bytes_sent += len(chunk)
+
+                    # Every ~100MB sent over the network, force the kernel to drop the file from RAM
+                    if bytes_sent >= 100 * 1024 * 1024:
+                        drop_os_cache(path)
+                        bytes_sent = 0
+        finally:
+            # Final sweep to ensure the file is dropped from cache once finished or aborted
             drop_os_cache(path)
 
     return StreamingResponse(
-        stream_file_and_drop_cache(filepath),
+        stream_file_and_drop_cache(filepath, start, content_length),
+        status_code=status_code,
         media_type=media_type,
         headers=headers
     )

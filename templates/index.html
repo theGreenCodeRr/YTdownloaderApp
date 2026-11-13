@@ -394,6 +394,41 @@
             margin: 0;
         }
         .pl-count { font-size: 0.85rem; color: var(--muted); }
+        .pl-range-bar {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            background: var(--surface);
+            border: 1px solid var(--card-border);
+            margin-bottom: 10px;
+        }
+        .pl-fractions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .chip.chip-sm {
+            min-height: 32px;
+            padding: 4px 10px;
+            font-size: 0.78rem;
+        }
+        .pl-range-inputs {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .pl-range-label { font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+        .pl-range-sep { color: var(--muted); font-weight: 600; }
+        .range-input {
+            width: 82px;
+            min-height: 34px;
+            padding: 6px 10px;
+            font-size: 16px;
+            text-align: center;
+        }
         .pl-filter { margin-bottom: 10px; }
         .pl-filter .text-input { min-height: 40px; padding: 8px 12px; font-size: 15px; }
 
@@ -599,6 +634,16 @@
                             </label>
                             <span id="plCount" class="pl-count">0 selected</span>
                         </div>
+                        <div id="plRangeBar" class="pl-range-bar premium-only hidden">
+                            <div id="plFractions" class="pl-fractions" role="group" aria-label="Quick playlist split"></div>
+                            <div class="pl-range-inputs">
+                                <span class="pl-range-label">Range:</span>
+                                <input type="number" id="plRangeFrom" class="text-input range-input" min="1" inputmode="numeric" placeholder="From" aria-label="From video number">
+                                <span class="pl-range-sep">–</span>
+                                <input type="number" id="plRangeTo" class="text-input range-input" min="1" inputmode="numeric" placeholder="To" aria-label="To video number">
+                                <button type="button" id="plRangeApplyBtn" class="btn btn-ghost btn-sm">Select</button>
+                            </div>
+                        </div>
                         <div id="plFilterWrap" class="pl-filter hidden">
                             <input type="search" id="plFilter" class="text-input" placeholder="Filter videos by title…" aria-label="Filter playlist">
                         </div>
@@ -619,6 +664,7 @@
             <aside class="card sidebar">
                 <div class="sidebar-head">
                     <h2>Recent Downloads</h2>
+                    <button type="button" id="clearHistoryBtn" class="btn btn-ghost btn-sm hidden">Clear</button>
                 </div>
                 <ul class="recent-list" id="recentList">
                     <li class="empty">Loading history…</li>
@@ -675,6 +721,11 @@
         const playlistEntries = $('playlistEntries');
         const selectAll = $('selectAll');
         const plCount = $('plCount');
+        const plRangeBar = $('plRangeBar');
+        const plFractions = $('plFractions');
+        const plRangeFrom = $('plRangeFrom');
+        const plRangeTo = $('plRangeTo');
+        const plRangeApplyBtn = $('plRangeApplyBtn');
         const plFilterWrap = $('plFilterWrap');
         const plFilter = $('plFilter');
         const plQuality = $('plQuality');
@@ -683,6 +734,7 @@
 
         const themeToggle = $('themeToggle');
         const recentList = $('recentList');
+        const clearHistoryBtn = $('clearHistoryBtn');
 
         // State
         let selectedFormatId = null;
@@ -857,10 +909,84 @@
 
             plFilter.value = '';
             plFilterWrap.classList.toggle('hidden', entries.length < 15);
+            renderPlaylistFractions(entries.length);
             renderPlaylistEntries();
             renderPlaylistQualities(data.formats || []);
             showResult('playlist');
             setStatus('');
+        }
+
+        function getContiguousSelectionRange() {
+            if (selectedEntries.size === 0) return null;
+            const sorted = [...selectedEntries].sort((a, b) => a - b);
+            const first = sorted[0];
+            const last = sorted[sorted.length - 1];
+            if (last - first + 1 !== sorted.length) return null;
+            return { start: first + 1, end: last + 1 };
+        }
+
+        function selectEntryRange(startOneBased, endOneBased) {
+            const entries = (currentPlaylistData && currentPlaylistData.entries) || [];
+            const total = entries.length;
+            if (total === 0) return;
+
+            let s = Math.max(1, Math.min(total, Number.isFinite(startOneBased) ? Math.trunc(startOneBased) : 1));
+            let e = Math.max(1, Math.min(total, Number.isFinite(endOneBased) ? Math.trunc(endOneBased) : total));
+            if (s > e) [s, e] = [e, s];
+
+            selectedEntries = new Set();
+            for (let i = s - 1; i < e; i++) selectedEntries.add(i);
+
+            plRangeFrom.value = s;
+            plRangeTo.value = e;
+            renderPlaylistEntries();
+
+            const firstChecked = playlistEntries.querySelector('.pl-item.checked');
+            if (firstChecked) firstChecked.scrollIntoView({ block: 'nearest' });
+        }
+
+        function renderPlaylistFractions(total) {
+            plFractions.innerHTML = '';
+            plRangeBar.classList.toggle('hidden', total < 2);
+            if (total < 2) return;
+
+            plRangeFrom.max = total;
+            plRangeTo.max = total;
+            plRangeFrom.value = 1;
+            plRangeTo.value = total;
+
+            const mid = Math.ceil(total / 2);
+            const presets = [
+                { label: `All (1–${total})`, start: 1, end: total },
+                { label: `1st Half (1–${mid})`, start: 1, end: mid },
+                { label: `2nd Half (${mid + 1}–${total})`, start: mid + 1, end: total }
+            ];
+            if (total >= 4) {
+                for (let k = 0; k < 4; k++) {
+                    const qs = Math.floor((k * total) / 4) + 1;
+                    const qe = Math.floor(((k + 1) * total) / 4);
+                    presets.push({ label: `Q${k + 1} (${qs}–${qe})`, start: qs, end: qe });
+                }
+            }
+
+            presets.forEach(p => {
+                const btn = el('button', 'chip chip-sm', p.label);
+                btn.type = 'button';
+                btn.dataset.start = String(p.start);
+                btn.dataset.end = String(p.end);
+                btn.addEventListener('click', () => selectEntryRange(p.start, p.end));
+                plFractions.appendChild(btn);
+            });
+        }
+
+        function applyCustomRange() {
+            const total = (currentPlaylistData && currentPlaylistData.entries || []).length;
+            if (!total) return;
+            const fromRaw = parseInt(plRangeFrom.value, 10);
+            const toRaw = parseInt(plRangeTo.value, 10);
+            const start = Number.isNaN(fromRaw) ? 1 : fromRaw;
+            const end = Number.isNaN(toRaw) ? total : toRaw;
+            selectEntryRange(start, end);
         }
 
         function renderPlaylistEntries() {
@@ -941,15 +1067,27 @@
             selectAll.checked = visible.length > 0 && visibleSelected === visible.length;
             selectAll.indeterminate = visibleSelected > 0 && visibleSelected < visible.length;
             plCount.textContent = `${selectedEntries.size} of ${total} selected`;
+
+            const range = getContiguousSelectionRange();
+            plFractions.querySelectorAll('.chip').forEach(chip => {
+                const match = range && Number(chip.dataset.start) === range.start && Number(chip.dataset.end) === range.end;
+                chip.classList.toggle('selected', Boolean(match));
+            });
+            if (range) {
+                plRangeFrom.value = range.start;
+                plRangeTo.value = range.end;
+            }
             updatePlaylistButton();
         }
 
         function updatePlaylistButton() {
             const total = (currentPlaylistData && currentPlaylistData.entries || []).length;
             const n = selectedEntries.size;
+            const range = n > 0 && n < total ? getContiguousSelectionRange() : null;
             downloadPlaylistBtn.disabled = busy || n === 0 || !playlistFormatId;
             if (n === 0) downloadPlaylistBtn.textContent = 'Select videos to download';
             else if (n === total) downloadPlaylistBtn.textContent = `Download all ${n} videos`;
+            else if (range) downloadPlaylistBtn.textContent = `Download ${n} selected (#${range.start}–${range.end})`;
             else downloadPlaylistBtn.textContent = `Download ${n} selected`;
         }
 
@@ -980,6 +1118,12 @@
             renderPlaylistEntries();
         });
         plFilter.addEventListener('input', renderPlaylistEntries);
+        plRangeApplyBtn.addEventListener('click', applyCustomRange);
+        [plRangeFrom, plRangeTo].forEach(inp => {
+            inp.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') applyCustomRange();
+            });
+        });
 
         // ---------- Fetch ----------
         async function fetchFormats(urlParam = null, fromPlaylist = false) {
@@ -1095,6 +1239,7 @@
 
             const entries = currentPlaylistData.entries || [];
             const allSelected = selectedEntries.size === entries.length;
+            const range = !allSelected ? getContiguousSelectionRange() : null;
             const items = [...selectedEntries].sort((a, b) => a - b).map(i => ({
                 url: entries[i].url,
                 title: entries[i].title || '',
@@ -1105,7 +1250,7 @@
                 url: currentPlaylistUrl || currentUrl,
                 password,
                 format_id: playlistFormatId,
-                title: currentPlaylistData.title || 'playlist',
+                title: (currentPlaylistData.title || 'playlist') + (range ? ` [#${range.start}-${range.end}]` : ''),
                 // Only send the list when the user picked a subset; otherwise the server fetches the full playlist
                 items: allSelected ? null : items
             });
@@ -1195,9 +1340,11 @@
 
                 recentList.innerHTML = '';
                 if (!data.recent || data.recent.length === 0) {
+                    clearHistoryBtn.classList.add('hidden');
                     recentList.appendChild(el('li', 'empty', 'No recent downloads yet.'));
                     return;
                 }
+                clearHistoryBtn.classList.toggle('hidden', !data.recent.some(i => i.status !== 'processing'));
 
                 data.recent.forEach(item => {
                     const li = el('li', 'recent-item');
@@ -1237,6 +1384,23 @@
             }
         }
 
+        async function clearHistory() {
+            clearHistoryBtn.disabled = true;
+            try {
+                const response = await fetch(`${API_URL}/api/recent/clear`, {
+                    method: 'POST',
+                    headers: HEADERS
+                });
+                if (response.ok) {
+                    await fetchRecentDownloads();
+                }
+            } catch (e) {
+                console.error('Failed to clear history', e);
+            } finally {
+                clearHistoryBtn.disabled = false;
+            }
+        }
+
         // ---------- Theme ----------
         function toggleTheme() {
             document.body.classList.toggle('dark-mode', themeToggle.checked);
@@ -1259,6 +1423,7 @@
         downloadButton.addEventListener('click', startDownload);
         downloadPlaylistBtn.addEventListener('click', startPlaylistDownload);
         cancelButton.addEventListener('click', cancelDownload);
+        clearHistoryBtn.addEventListener('click', clearHistory);
         themeToggle.addEventListener('change', toggleTheme);
 
         // Init

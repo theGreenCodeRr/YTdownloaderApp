@@ -17,8 +17,8 @@ jobs:
       - name: Sync Configuration to /opt/
         run: |
           # Rsync copies the files from the runner workspace to your permanent config folder
-          # Server-only files (.env, secrets/, data/) are excluded so they are never touched
-          rsync -avz --exclude '.git' --exclude '.env' --exclude 'secrets/' --exclude 'data/' --exclude 'cookies.txt' ./ /opt/deployments/ytdown/
+          # Server-only files (.env, secrets/, data/) and mobile/ are excluded
+          rsync -avz --exclude '.git' --exclude '.env' --exclude 'secrets/' --exclude 'data/' --exclude 'cookies.txt' --exclude 'mobile/' ./ /opt/deployments/ytdown/
 
       - name: Deploy with Docker Compose
         run: |

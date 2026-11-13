@@ -83,12 +83,35 @@ class Store:
         rows = self._query("SELECT * FROM tasks WHERE task_id=?", (task_id,))
         return rows[0] if rows else None
 
-    def recent_for_client(self, client_id: str, limit: int = 50) -> list:
+    def recent_for_client(self, client_id: str, limit: int = 50, max_age_seconds: Optional[int] = None) -> list:
+        if max_age_seconds and max_age_seconds > 0:
+            cutoff = time.time() - max_age_seconds
+            return self._query(
+                "SELECT task_id, title, thumbnail, format_id AS format, kind, status, error, note, created_at AS timestamp "
+                "FROM tasks WHERE client_id=? AND (created_at >= ? OR status = 'processing') "
+                "ORDER BY created_at DESC LIMIT ?",
+                (client_id, cutoff, limit),
+            )
         return self._query(
             "SELECT task_id, title, thumbnail, format_id AS format, kind, status, error, note, created_at AS timestamp "
             "FROM tasks WHERE client_id=? ORDER BY created_at DESC LIMIT ?",
             (client_id, limit),
         )
+
+    def clear_client_history(self, client_id: str) -> list:
+        with self._lock:
+            rows = [
+                dict(r)
+                for r in self._conn.execute(
+                    "SELECT task_id, filepath FROM tasks WHERE client_id=? AND status != 'processing'",
+                    (client_id,),
+                ).fetchall()
+            ]
+            self._conn.execute(
+                "DELETE FROM tasks WHERE client_id=? AND status != 'processing'",
+                (client_id,),
+            )
+            return rows
 
     def tasks_with_status(self, status: str) -> list:
         return self._query("SELECT * FROM tasks WHERE status=?", (status,))

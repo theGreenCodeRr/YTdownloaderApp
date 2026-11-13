@@ -19,11 +19,11 @@ You can test the functionality of this application before installing it yourself
 
 * **Universal Platform Support:** Download videos from YouTube, Facebook, and many other websites supported by `yt-dlp` (with Deno JS runtime and `curl-cffi` impersonation included in Docker).
 * **Selective & Full Playlist Downloads:** Browse playlist entries, check only the videos you want (or select all), and download them as a bundled ZIP archive with transparent progress tracking.
-* **Persistent Download History (SQLite):** Tasks and per-client download history are stored in SQLite (`storage.py`) so history survives restarts and rebuilds.
+* **Persistent Download History (SQLite):** Tasks and per-client download history are stored in SQLite (`storage.py`) so history survives restarts and rebuilds, auto-expiring after 24 hours (`HISTORY_TTL_SECONDS`) with a manual **Clear** action (`POST /api/recent/clear`).
 * **Unicode-Safe Filenames:** Non-English titles (Japanese, Bengali, Arabic, emojis, etc.) are preserved cleanly using RFC 5987 (`filename*=UTF-8''...`) `Content-Disposition` headers.
 * **Advanced Audio Extraction:** Download videos directly as high-quality audio files (**MP3**, **Lossless WAV**, or **Lossless FLAC**) via server-side FFmpeg processing.
-* **Resource Optimized (Zero Memory Leaks):** Designed to run efficiently on low-memory VPS environments by isolating each playlist video into a completely separate memory context. It uses explicit Linux Kernel OS Cache flushing (`posix_fadvise`) to ensure massive files stream straight to disk without blowing up RAM.
-* **Stability & Security Guardrails:** Enforces concurrent download limits (Semaphore of 3), disk space validation (>2 GiB free), per-IP sliding-window rate limits, password brute-force lockout, strict default CORS, and TLS verification enabled by default.
+* **Resource Optimized (Zero Memory Leaks & 1× Disk Usage):** Isolates each playlist video into a separate subprocess, uses Linux OS Cache flushing (`posix_fadvise`), packs videos incrementally into the `.zip` archive while deleting each source file immediately (no 2× disk spike), and enforces a configurable `MAX_DOWNLOAD_GB` (default `200` GB) limit.
+* **Stability & Security Guardrails:** Enforces concurrent download limits (Semaphore of 3), disk space validation (>2 GiB free), per-IP sliding-window rate limits, SSRF private-IP blocking, strict format validation, password brute-force lockout, strict default CORS, and TLS verification enabled by default.
 * **Login-Only Content Support:** Safely supports `cookies.txt` (copied per subprocess and optionally mounted read-only at `./secrets/cookies.txt`).
 * **Automated Cleanup:** Purges temporary files after `SERVE_GRACE_SECONDS` (default 600s) post-download, sweeps orphaned files on startup, and expires old records periodically.
 
@@ -108,12 +108,16 @@ Requires `PREMIUM_PASSWORD` to be configured on the server; otherwise returns `5
 
 ### 5. Download the File
 `GET /api/download/{task_id}`
-This endpoint streams the file in chunks. The file name is sent RFC 5987-encoded (`filename*=UTF-8''...`), so non-English titles (Japanese, Bengali, ...) are preserved. The file is removed from the server `SERVE_GRACE_SECONDS` (default 600) after it is first served. Once expired or removed, requests return `410 Gone`.
+This endpoint streams the file in chunks and supports HTTP `Range` (`206 Partial Content` / `Accept-Ranges: bytes`) for resumable mobile downloads, with `Cache-Control: no-store` and `X-Accel-Buffering: no`. The file name is sent RFC 5987-encoded (`filename*=UTF-8''...`), so non-English titles (Japanese, Bengali, ...) are preserved. The file is removed from the server `SERVE_GRACE_SECONDS` (default 600) after streaming finishes. Once expired or removed, requests return `410 Gone`.
 
 ### 6. Cancel a Download
 `POST /api/cancel/{task_id}`
 
-### 7. Health & Capabilities
+### 7. Recent Downloads & Clear History
+`GET /api/recent` — Returns up to 50 recent tasks from the last 24 hours (`HISTORY_TTL_SECONDS`, default `86400`) for `x-client-id`.
+`POST /api/recent/clear` (or `DELETE /api/recent`) — Clears finished/expired history items for `x-client-id` and removes any remaining server files immediately.
+
+### 8. Health & Capabilities
 `GET /api/health`
 ```json
 // Response
@@ -123,6 +127,7 @@ This endpoint streams the file in chunks. The file name is sent RFC 5987-encoded
   "js_runtime": true,
   "cookies_loaded": false,
   "premium_enabled": true,
+  "max_download_gb": 200,
   "active_downloads": 0
 }
 ```
@@ -149,7 +154,8 @@ Key variables:
 - `ALLOWED_ORIGINS`: Comma-separated browser origins allowed via CORS. Leave empty to restrict to same-origin (native mobile apps are unaffected).
 - `FORWARDED_ALLOW_IPS`: Reverse proxy IP(s) or CIDR (default `127.0.0.1`) so Uvicorn `--proxy-headers` reads the real visitor IP from `X-Forwarded-For` for rate limiting.
 - `RATE_LIMIT_INFO`, `RATE_LIMIT_PROCESS`, `RATE_LIMIT_PLAYLIST`, `RATE_LIMIT_PASSWORD_FAILS`, `MAX_ACTIVE_TASKS_PER_IP`: Per-IP rate limits (`<count>/<seconds>`, `0/1` disables a limit).
-- `SERVE_GRACE_SECONDS`, `FILE_TTL_SECONDS`, `HISTORY_TTL_SECONDS`: File and history retention windows.
+- `SERVE_GRACE_SECONDS`, `FILE_TTL_SECONDS`, `HISTORY_TTL_SECONDS`: File and history retention windows (`HISTORY_TTL_SECONDS` defaults to `86400` = 24 hours).
+- `MAX_DOWNLOAD_GB`: Maximum allowed download / playlist ZIP size in GB (default `200`).
 - `DB_PATH`, `TEMP_STORAGE_DIR`, `COOKIES_FILE`: Paths for SQLite DB, temporary media, and optional cookies.
 - `YTDLP_NO_CHECK_CERTIFICATE`: `false` by default (TLS verification enabled). Set `true` only behind an intercepting proxy.
 
