@@ -51,7 +51,7 @@ FILE_TTL_SECONDS = int(os.environ.get("FILE_TTL_SECONDS", "86400"))
 HISTORY_TTL_SECONDS = int(os.environ.get("HISTORY_TTL_SECONDS", "86400"))
 
 # Maximum size of any single download or playlist ZIP archive (default: 200 GB)
-MAX_DOWNLOAD_GB = int(os.environ.get("MAX_DOWNLOAD_GB", "200"))
+MAX_DOWNLOAD_GB = int(os.environ.get("MAX_DOWNLOAD_GB", "400"))
 MAX_DOWNLOAD_BYTES = MAX_DOWNLOAD_GB * 1024 * 1024 * 1024
 MAX_PLAYLIST_ITEMS = int(os.environ.get("MAX_PLAYLIST_ITEMS", "500"))
 BLOCK_PRIVATE_URLS = _env_bool("BLOCK_PRIVATE_URLS", True)
