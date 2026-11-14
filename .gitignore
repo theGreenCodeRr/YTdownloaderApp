@@ -7,7 +7,7 @@ cookies.txt
 secrets/
 
 # Runtime data
-data/
+/data/
 *.db
 *.db-shm
 *.db-wal
