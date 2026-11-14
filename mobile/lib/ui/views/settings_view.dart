@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/models/models.dart';
 import '../../data/services/preferences_service.dart';
@@ -237,6 +238,14 @@ class _SettingsViewState extends State<SettingsView> {
                         },
                       ),
                     ),
+                    const Divider(),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Privacy Policy'),
+                      subtitle: Text('${vm.baseUrl}/privacy'),
+                      trailing: const Icon(Icons.open_in_new_rounded),
+                      onTap: () => _openPrivacyPolicy(context),
+                    ),
                   ],
                 ),
               ),
@@ -245,6 +254,17 @@ class _SettingsViewState extends State<SettingsView> {
         ),
       ),
     );
+  }
+
+  Future<void> _openPrivacyPolicy(BuildContext context) async {
+    final uri = Uri.tryParse('${vm.baseUrl}/privacy');
+    if (uri == null) return;
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open ${uri.toString()}')),
+      );
+    }
   }
 
   Future<void> _confirmDeleteLocal(BuildContext context) async {

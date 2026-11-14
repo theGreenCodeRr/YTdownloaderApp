@@ -1,4 +1,4 @@
-package com.quantumsofts.yt_downloader_mobile
+package com.quantumsofts.simpledownloader
 
 import android.content.Intent
 import android.os.Bundle
@@ -7,7 +7,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    private val channelName = "com.quantumsofts.ytdownloader/share_intent"
+    private val channelName = "com.quantumsofts.simpledownloader/share_intent"
     private var sharedText: String? = null
     private var channel: MethodChannel? = null
 

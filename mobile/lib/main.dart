@@ -61,7 +61,7 @@ class _YTDownloaderAppState extends State<YTDownloaderApp> {
       listenable: _viewModel,
       builder: (context, _) {
         return MaterialApp(
-          title: 'YT Downloader',
+          title: 'Simple Downloader',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.light(),
           darkTheme: AppTheme.dark(),

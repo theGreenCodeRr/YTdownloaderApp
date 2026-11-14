@@ -26,7 +26,7 @@ class DownloaderViewModel extends ChangeNotifier {
   final bool enableShareChannel;
 
   static const MethodChannel _shareChannel = MethodChannel(
-    'com.quantumsofts.ytdownloader/share_intent',
+    'com.quantumsofts.simpledownloader/share_intent',
   );
 
   bool _disposed = false;

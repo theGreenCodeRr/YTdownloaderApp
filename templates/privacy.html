@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy — Simple Downloader</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #0f172a;
+            --muted: #475569;
+            --border: #e2e8f0;
+            --accent: #4f46e5;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0f172a;
+                --card: #1e293b;
+                --text: #f1f5f9;
+                --muted: #94a3b8;
+                --border: #334155;
+                --accent: #818cf8;
+            }
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 32px 16px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.65;
+        }
+        main {
+            max-width: 760px;
+            margin: 0 auto;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px 28px;
+        }
+        h1 { margin-top: 0; font-size: 1.75rem; }
+        h2 { margin-top: 28px; font-size: 1.15rem; color: var(--accent); }
+        p, li { color: var(--muted); }
+        code {
+            background: var(--border);
+            color: var(--text);
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-size: 0.9em;
+        }
+        a { color: var(--accent); }
+        .meta { font-size: 0.9rem; color: var(--muted); margin-bottom: 24px; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Privacy Policy — Simple Downloader</h1>
+    <p class="meta">Package ID: <code>com.quantumsofts.simpledownloader</code> · Effective Date: November 14, 2026</p>
+
+    <p>
+        Simple Downloader ("the App") helps you inspect and download publicly accessible media links to your device via a user-configured server (defaulting to <code>https://yt.quantumsofts.com</code>).
+    </p>
+
+    <h2>1. Data We Process</h2>
+    <ul>
+        <li><strong>Media URLs you submit:</strong> Links you paste or share into the App are sent over HTTPS solely to fetch available media formats and prepare your requested download.</li>
+        <li><strong>Anonymous Client Identifier (<code>X-Client-ID</code>):</strong> The App generates a random UUID locally on your device so your download queue and recent history remain isolated from other users. No account, email address, phone number, or personal profile is required.</li>
+        <li><strong>Rate-Limiting Logs:</strong> For server stability and abuse prevention, incoming IP addresses are temporarily checked in memory for rate limiting and discarded automatically after the short rate-limit window expires.</li>
+    </ul>
+
+    <h2>2. Data Retention &amp; Deletion</h2>
+    <ul>
+        <li><strong>Temporary Media Files:</strong> Processed media and ZIP archives are automatically purged shortly after download completion or expiration.</li>
+        <li><strong>24-Hour History Expiry:</strong> Download history records are automatically filtered and expired after 24 hours, or deleted immediately whenever you tap the <strong>Clear</strong> button in the App.</li>
+        <li><strong>Local Device Files:</strong> Downloaded files saved on your phone or tablet can be deleted at any time from inside <strong>Settings &rarr; Delete Files</strong> or by uninstalling the App.</li>
+    </ul>
+
+    <h2>3. No Tracking or Third-Party Sharing</h2>
+    <p>
+        Simple Downloader does not sell, rent, or share user data with advertisers or data brokers, and contains no third-party advertising SDKs or behavioral analytics trackers.
+    </p>
+
+    <h2>4. App Permissions</h2>
+    <ul>
+        <li><strong>Network Access (<code>INTERNET</code>):</strong> Used to communicate with your configured Simple Downloader backend server.</li>
+        <li><strong>App Storage:</strong> Used to save your requested media downloads and resume interrupted transfers.</li>
+    </ul>
+
+    <h2>5. Contact</h2>
+    <p>
+        For privacy questions or deletion requests, please contact <a href="mailto:support@quantumsofts.com">support@quantumsofts.com</a>.
+    </p>
+</main>
+</body>
+</html>

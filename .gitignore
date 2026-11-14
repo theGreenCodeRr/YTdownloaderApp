@@ -5,6 +5,9 @@
 cookies.txt
 *cookies*.txt
 secrets/
+key.properties
+*.jks
+*.keystore
 
 # Runtime data
 /data/

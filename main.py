@@ -1369,6 +1369,10 @@ async def download_file(task_id: str, request: Request, background_tasks: Backgr
 async def serve_frontend(request: Request):
     return templates.TemplateResponse(request=request, name="index.html", context={"request": request})
 
+@app.get("/privacy")
+async def serve_privacy(request: Request):
+    return templates.TemplateResponse(request=request, name="privacy.html", context={"request": request})
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

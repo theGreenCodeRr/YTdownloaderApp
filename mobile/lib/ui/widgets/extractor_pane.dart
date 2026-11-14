@@ -199,7 +199,7 @@ class _ExtractorPaneState extends State<ExtractorPane> {
                     onChanged: vm.setUrlInput,
                     onSubmitted: (_) => vm.fetchInfo(_urlController.text),
                     decoration: InputDecoration(
-                      hintText: 'Paste YouTube, Facebook, Instagram, TikTok URL…',
+                      hintText: 'Paste video, audio, or playlist URL…',
                       prefixIcon: const Icon(Icons.link_rounded),
                       suffixIcon: _urlController.text.isNotEmpty
                           ? IconButton(
@@ -251,7 +251,7 @@ class _ExtractorPaneState extends State<ExtractorPane> {
       (Icons.high_quality_rounded, 'Up to 4K Video & Lossless Audio (MP3, WAV, FLAC)'),
       (Icons.view_column_rounded, 'Quick-Split Big Playlists (Half, Quarters, Custom Range)'),
       (Icons.wifi_tethering_rounded, 'Resumable Transfers for 400 GB Archives over Wi-Fi / 5G'),
-      (Icons.share_rounded, 'Share links directly from YouTube, Instagram, Facebook & TikTok'),
+      (Icons.share_rounded, 'Share media links directly from your browser or social apps'),
     ];
 
     return Card(

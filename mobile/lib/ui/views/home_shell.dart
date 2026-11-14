@@ -84,7 +84,7 @@ class _HomeShellState extends State<HomeShell> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('YT Downloader'),
+        title: const Text('Simple Downloader'),
         centerTitle: false,
         actions: [
           Padding(
@@ -129,7 +129,7 @@ class _HomeShellState extends State<HomeShell> {
     final activeCount = widget.viewModel.activeWorkCount;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('YT Downloader'),
+        title: const Text('Simple Downloader'),
         centerTitle: false,
         actions: [
           Padding(
